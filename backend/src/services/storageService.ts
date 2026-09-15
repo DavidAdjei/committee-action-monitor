@@ -68,5 +68,12 @@ export async function readEvidenceFile(storageKey: string): Promise<Buffer> {
   if (process.env.EVIDENCE_STORAGE_CONNECTION_STRING) {
     throw new Error("Azure Blob Storage read path is not wired up in this starter.");
   }
-  return fs.readFile(path.join(LOCAL_DIR, storageKey));
+  try {
+    return await fs.readFile(path.join(LOCAL_DIR, storageKey));
+  } catch (err: any) {
+    if (err?.code === "ENOENT") {
+      throw new EvidenceValidationError("Evidence file was not found in storage.");
+    }
+    throw err;
+  }
 }

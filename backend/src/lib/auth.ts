@@ -77,7 +77,7 @@ async function resolveFromEasyAuth(req: HttpRequest): Promise<User | null> {
 
 async function resolveFromDevHeader(req: HttpRequest): Promise<User | null> {
   if (process.env.DEV_AUTH_ENABLED !== "true") return null;
-  const idHeader = req.headers.get("x-dev-user-id");
+  const idHeader = req.headers.get("x-dev-user-id") ?? req.query.get("devUserId");
   if (!idHeader) return null;
   const id = Number(idHeader);
   if (!Number.isInteger(id)) return null;

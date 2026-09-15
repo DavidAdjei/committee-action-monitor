@@ -2,7 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/fu
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
 import { requireViewCommittee, isCommitteeOfficer } from "../lib/authorize";
-import { ok, errorResponse, preflight, Errors } from "../lib/http";
+import { ok, errorResponse, preflight, Errors, corsHeaders } from "../lib/http";
 import { storeEvidenceFile, readEvidenceFile, EvidenceValidationError } from "../services/storageService";
 
 /**
@@ -81,9 +81,14 @@ async function downloadEvidence(req: HttpRequest, _ctx: InvocationContext): Prom
       headers: {
         "Content-Type": evidence.mediaType,
         "Content-Disposition": `attachment; filename="${evidence.filename}"`,
+        "Access-Control-Expose-Headers": "Content-Disposition",
+        ...corsHeaders(),
       },
     };
   } catch (err) {
+    if (err instanceof EvidenceValidationError) {
+      return errorResponse(Errors.notFound(err.message));
+    }
     return errorResponse(err);
   }
 }

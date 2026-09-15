@@ -109,6 +109,8 @@ export const endpoints = {
       form,
     );
   },
+  downloadEvidence: (evidenceId: number, filename?: string) =>
+    api.download(`/evidence/${evidenceId}/download`, filename),
   verifyAction: (actionId: number, approve: boolean, note?: string) =>
     api.post(`/actions/${actionId}/verify`, { approve, note }),
 

@@ -57,4 +57,46 @@ export const api = {
   postForm: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
   patch: <T>(path: string, data?: unknown) =>
     request<T>(path, { method: "PATCH", body: data !== undefined ? JSON.stringify(data) : undefined }),
+  download: async (path: string, fallbackFilename = "download"): Promise<void> => {
+    const devUserId = getDevUserId();
+    const headers: Record<string, string> = {
+      ...(devUserId ? { "x-dev-user-id": String(devUserId) } : {}),
+    };
+
+    useLoadingStore.getState().startRequest();
+    try {
+      const res = await fetch(`${BASE_URL}${path}`, { method: "GET", headers });
+      if (!res.ok) {
+        let errMsg = res.statusText;
+        try {
+          const body = await res.json();
+          if (body?.error?.message) errMsg = body.error.message;
+        } catch {
+          // ignore
+        }
+        throw new ApiClientError(res.status, "DOWNLOAD_FAILED", errMsg);
+      }
+
+      const blob = await res.blob();
+      let filename = fallbackFilename;
+      const disposition = res.headers.get("content-disposition");
+      if (disposition) {
+        const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]*)["']?/i);
+        if (match && match[1]) {
+          filename = decodeURIComponent(match[1]);
+        }
+      }
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } finally {
+      useLoadingStore.getState().stopRequest();
+    }
+  },
 };
