@@ -1,0 +1,19 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "DATABASE_URL": "mysql://cam_app:changeme@localhost:3306/committee_actions",
+    "CORS_ALLOWED_ORIGIN": "http://localhost:5173",
+    "DEV_AUTH_ENABLED": "true",
+    "GRAPH_TENANT_ID": "",
+    "GRAPH_CLIENT_ID": "",
+    "GRAPH_CLIENT_SECRET": "",
+    "EVIDENCE_STORAGE_CONNECTION_STRING": "",
+    "EVIDENCE_STORAGE_CONTAINER": "evidence"
+  },
+  "Host": {
+    "CORS": "*",
+    "CORSCredentials": false
+  }
+}

@@ -1,0 +1,380 @@
+// Committee Action Monitor — Prisma schema (MySQL)
+//
+// This schema implements the "Required schema refinements" section of the
+// system documentation:
+//  - entra_object_id is the durable identity key (not email)
+//  - committee_memberships replaces a single global user.role
+//  - meetings + committee_meetings are consolidated into one Meeting model
+//  - action_updates is append-only status/progress history
+//  - evidence metadata is modeled explicitly and stored outside the DB
+//  - optimistic concurrency (version) protects action point updates
+//  - every author/approver reference is a real foreign key
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id             Int      @id @default(autoincrement())
+  entraObjectId  String?  @unique @map("entra_object_id")
+  fullName       String   @map("full_name") @db.VarChar(160)
+  email          String   @unique @db.VarChar(190)
+  department     String?  @db.VarChar(160)
+  active         Boolean  @default(true)
+  // Bank-wide read-only oversight role. Distinct from any sub-committee role.
+  isCentralCommittee Boolean @default(false) @map("is_central_committee")
+  // Central Committee Administrator: may create committees and set leadership.
+  isAdmin        Boolean  @default(false) @map("is_admin")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  chairsCommittees      Committee[]           @relation("CommitteeChair")
+  secretariesCommittees Committee[]           @relation("CommitteeSecretary")
+  centralRepCommittees  Committee[]           @relation("CommitteeCentralRep")
+  memberships           CommitteeMembership[]
+  ownedActions          ActionPoint[]         @relation("ActionOwner")
+  createdActions        ActionPoint[]         @relation("ActionCreatedBy")
+  verifiedActions       ActionPoint[]         @relation("ActionVerifiedBy")
+  actionUpdatesAuthored ActionUpdate[]
+  stakeholderOf         ActionStakeholder[]
+  notifications         Notification[]
+  evidenceUploaded      EvidenceFile[]
+  meetingsCreated       Meeting[]
+  minutesCreated        MeetingMinutes[]
+  auditEvents           AuditEvent[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Committees
+// ---------------------------------------------------------------------------
+
+model Committee {
+  id               Int      @id @default(autoincrement())
+  name             String   @unique @db.VarChar(180)
+  code             String   @unique @db.VarChar(40)
+  mandate          String?  @db.Text
+  meetingFrequency String?  @map("meeting_frequency") @db.VarChar(60)
+  chairpersonId    Int      @map("chairperson_id")
+  secretaryId      Int      @map("secretary_id")
+  centralRepId     Int      @map("central_rep_id")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  chairperson  User                  @relation("CommitteeChair", fields: [chairpersonId], references: [id])
+  secretary    User                  @relation("CommitteeSecretary", fields: [secretaryId], references: [id])
+  centralRep   User                  @relation("CommitteeCentralRep", fields: [centralRepId], references: [id])
+  memberships  CommitteeMembership[]
+  meetings     Meeting[]
+  actionPoints ActionPoint[]
+  auditEvents  AuditEvent[]
+
+  @@map("committees")
+}
+
+enum CommitteeRole {
+  CHAIRPERSON
+  SECRETARY
+  MEMBER
+}
+
+// Recommended join table: a person's role is scoped to one committee, so the
+// same user can be Secretary in one committee and an ordinary Member in
+// another.
+model CommitteeMembership {
+  id          Int           @id @default(autoincrement())
+  committeeId Int           @map("committee_id")
+  userId      Int           @map("user_id")
+  role        CommitteeRole
+  startDate   DateTime      @default(now()) @map("start_date")
+  endDate     DateTime?     @map("end_date")
+  active      Boolean       @default(true)
+
+  committee Committee @relation(fields: [committeeId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@unique([committeeId, userId], name: "uq_committee_user")
+  @@index([userId, active])
+  @@map("committee_memberships")
+}
+
+// ---------------------------------------------------------------------------
+// Meetings & minutes
+// ---------------------------------------------------------------------------
+
+model Meeting {
+  id            Int      @id @default(autoincrement())
+  committeeId   Int      @map("committee_id")
+  reference     String   @db.VarChar(80)
+  title         String   @db.VarChar(255)
+  startsAt      DateTime @map("starts_at")
+  endsAt        DateTime? @map("ends_at")
+  venue         String?  @db.VarChar(255)
+  agenda        String?  @db.Text
+  teamsRequested Boolean @default(false) @map("teams_requested")
+  teamsEventId  String?  @map("teams_event_id") @db.VarChar(255)
+  teamsJoinUrl  String?  @map("teams_join_url") @db.Text
+  createdById   Int      @map("created_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  committee    Committee        @relation(fields: [committeeId], references: [id])
+  createdBy    User             @relation(fields: [createdById], references: [id])
+  actionPoints ActionPoint[]
+  minutes      MeetingMinutes[]
+
+  @@unique([committeeId, reference], name: "uq_committee_meeting_reference")
+  @@map("meetings")
+}
+
+enum MinutesStatus {
+  DRAFT
+  ISSUED
+  APPROVED
+}
+
+enum MinutesSource {
+  LATEST_MEETING
+  PREVIOUS_MEETING
+  ALL_OPEN_ACTIONS
+}
+
+model MeetingMinutes {
+  id               Int           @id @default(autoincrement())
+  meetingId        Int           @map("meeting_id")
+  status           MinutesStatus @default(DRAFT)
+  sourcePopulation MinutesSource @default(LATEST_MEETING) @map("source_population")
+  discussion       String?       @db.Text
+  documentUrl      String?       @map("document_url") @db.Text
+  createdById      Int           @map("created_by_id")
+  issuedAt         DateTime?     @map("issued_at")
+  approvedAt       DateTime?     @map("approved_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  meeting   Meeting                  @relation(fields: [meetingId], references: [id])
+  createdBy User                     @relation(fields: [createdById], references: [id])
+  snapshots MinuteActionSnapshot[]
+
+  @@map("meeting_minutes")
+}
+
+// Immutable snapshot of an action's status at the moment minutes were
+// issued — later action changes must never rewrite this history.
+model MinuteActionSnapshot {
+  minutesId       Int      @map("minutes_id")
+  actionPointId   Int      @map("action_point_id")
+  sourceMeetingId Int?     @map("source_meeting_id")
+  actionStatus    String   @map("action_status") @db.VarChar(40)
+  progressPercent Int      @map("progress_percent")
+  ownerRemarks    String?  @map("owner_remarks") @db.Text
+  capturedAt      DateTime @default(now()) @map("captured_at")
+
+  minutes     MeetingMinutes @relation(fields: [minutesId], references: [id])
+  actionPoint ActionPoint    @relation(fields: [actionPointId], references: [id])
+
+  @@id([minutesId, actionPointId])
+  @@map("minute_action_snapshots")
+}
+
+// ---------------------------------------------------------------------------
+// Action points
+// ---------------------------------------------------------------------------
+
+enum ActionPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ActionStatus {
+  OPEN
+  IN_PROGRESS
+  OVERDUE
+  PENDING_VERIFICATION
+  COMPLETED
+  CANCELLED
+}
+
+model ActionPoint {
+  id              Int            @id @default(autoincrement())
+  referenceNo     String         @unique @map("reference_no") @db.VarChar(40)
+  meetingId       Int            @map("meeting_id")
+  committeeId     Int            @map("committee_id")
+  title           String         @db.VarChar(300)
+  description     String?        @db.Text
+  minutesReference String?       @map("minutes_reference") @db.VarChar(120)
+  ownerId         Int            @map("owner_id")
+  dateRaised      DateTime       @map("date_raised") @db.Date
+  deadline        DateTime       @db.Date
+  revisedDeadline DateTime?      @map("revised_deadline") @db.Date
+  priority        ActionPriority @default(MEDIUM)
+  status          ActionStatus   @default(OPEN)
+  progress        Int            @default(0)
+  statusReason    String?        @map("status_reason") @db.Text
+  completedAt     DateTime?      @map("completed_at")
+  verifiedById    Int?           @map("verified_by_id")
+  verifiedAt      DateTime?      @map("verified_at")
+  completionNote  String?        @map("completion_note") @db.Text
+  createdById     Int            @map("created_by_id")
+  version         Int            @default(0)
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  meeting      Meeting                 @relation(fields: [meetingId], references: [id])
+  committee    Committee               @relation(fields: [committeeId], references: [id])
+  owner        User                    @relation("ActionOwner", fields: [ownerId], references: [id])
+  createdBy    User                    @relation("ActionCreatedBy", fields: [createdById], references: [id])
+  verifiedBy   User?                   @relation("ActionVerifiedBy", fields: [verifiedById], references: [id])
+  stakeholders ActionStakeholder[]
+  updates      ActionUpdate[]
+  notifications Notification[]
+  snapshots    MinuteActionSnapshot[]
+  auditEvents  AuditEvent[]
+
+  @@index([deadline, status], name: "ix_actions_deadline_status")
+  @@index([ownerId, status], name: "ix_actions_owner")
+  @@index([committeeId, status], name: "ix_actions_committee")
+  @@map("action_points")
+}
+
+enum StakeholderType {
+  CHAIRPERSON
+  SECRETARY
+  ACTION_OWNER
+  CENTRAL_COMMITTEE
+  OTHER
+}
+
+model ActionStakeholder {
+  actionPointId   Int             @map("action_point_id")
+  userId          Int             @map("user_id")
+  stakeholderType StakeholderType @map("stakeholder_type")
+
+  actionPoint ActionPoint @relation(fields: [actionPointId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id])
+
+  @@id([actionPointId, userId])
+  @@map("action_stakeholders")
+}
+
+// Append-only history of every status/progress change made to an action.
+model ActionUpdate {
+  id              Int          @id @default(autoincrement())
+  actionPointId   Int          @map("action_point_id")
+  authorId        Int          @map("author_id")
+  status          ActionStatus
+  progress        Int
+  note            String       @db.Text
+  revisedDeadline DateTime?    @map("revised_deadline") @db.Date
+  evidenceLink    String?      @map("evidence_link") @db.Text
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  actionPoint ActionPoint    @relation(fields: [actionPointId], references: [id], onDelete: Cascade)
+  author      User           @relation(fields: [authorId], references: [id])
+  evidenceFiles EvidenceFile[]
+
+  @@map("action_updates")
+}
+
+model EvidenceFile {
+  id             Int      @id @default(autoincrement())
+  actionUpdateId Int      @map("action_update_id")
+  storageKey     String   @map("storage_key") @db.VarChar(500)
+  filename       String   @db.VarChar(260)
+  mediaType      String   @map("media_type") @db.VarChar(150)
+  sizeBytes      Int      @map("size_bytes")
+  sha256         String?  @db.VarChar(64)
+  scanResult     String   @default("PENDING") @map("scan_result") @db.VarChar(20)
+  uploadedById   Int      @map("uploaded_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  actionUpdate ActionUpdate @relation(fields: [actionUpdateId], references: [id], onDelete: Cascade)
+  uploadedBy   User         @relation(fields: [uploadedById], references: [id])
+
+  @@map("evidence_files")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+  TEAMS
+}
+
+enum NotificationType {
+  CREATED
+  DAILY_REMINDER
+  OVERDUE_ESCALATION
+  STATUS_CHANGE
+  EVIDENCE_SUBMITTED
+  EVIDENCE_VERIFIED
+  MINUTES_ISSUED
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// Durable notification outbox. Rows are written in the same transaction as
+// the business event so a committed action is never silently lost, and an
+// idempotency key stops retries from duplicating a send.
+model Notification {
+  id               Int                 @id @default(autoincrement())
+  actionPointId    Int?                @map("action_point_id")
+  recipientId      Int                 @map("recipient_id")
+  channel          NotificationChannel
+  notificationType NotificationType    @map("notification_type")
+  idempotencyKey   String              @unique @map("idempotency_key") @db.VarChar(255)
+  scheduledFor     DateTime            @map("scheduled_for")
+  sentAt           DateTime?           @map("sent_at")
+  deliveryStatus   DeliveryStatus      @default(PENDING) @map("delivery_status")
+  errorMessage     String?             @map("error_message") @db.VarChar(500)
+  readAt           DateTime?           @map("read_at")
+  createdAt        DateTime            @default(now()) @map("created_at")
+
+  actionPoint ActionPoint? @relation(fields: [actionPointId], references: [id])
+  recipient   User         @relation(fields: [recipientId], references: [id])
+
+  @@index([deliveryStatus, scheduledFor], name: "ix_notification_queue")
+  @@index([recipientId, readAt])
+  @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
+
+model AuditEvent {
+  id            Int      @id @default(autoincrement())
+  occurredAt    DateTime @default(now()) @map("occurred_at")
+  actorUserId   Int?     @map("actor_user_id")
+  action        String   @db.VarChar(120)
+  resourceType  String   @map("resource_type") @db.VarChar(60)
+  resourceId    Int?     @map("resource_id")
+  committeeId   Int?     @map("committee_id")
+  actionPointId Int?     @map("action_point_id")
+  before        Json?
+  after         Json?
+  result        String   @db.VarChar(20)
+  correlationId String?  @map("correlation_id") @db.VarChar(80)
+
+  actor       User?        @relation(fields: [actorUserId], references: [id])
+  committee   Committee?   @relation(fields: [committeeId], references: [id])
+  actionPoint ActionPoint? @relation(fields: [actionPointId], references: [id])
+
+  @@map("audit_events")
+}

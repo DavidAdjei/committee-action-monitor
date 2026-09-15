@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+local.settings.json
+.DS_Store
+
+# IDE
+
+.idea/
+*.swp
+*.swo
+
+# Runtime
+.evidence-storage/
+*.log
+.evidence-storage/
+
+# OS
+.DS_Store
+Thumbs.db
+
+__blobstorage__/
+__queuestorage__/
+__azurite_db_blob__.json
+__azurite_db_blob_extent__.json
+__azurite_db_table__.json
+__azurite_db_queue__.json
+__azurite_db_queue_extent__.json
+

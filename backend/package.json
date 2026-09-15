@@ -1,0 +1,32 @@
+{
+  "name": "committee-action-monitor-api",
+  "version": "1.0.0",
+  "description": "Committee Action Monitor — Azure Functions (TypeScript) API backed by Prisma/MySQL",
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "clean": "rimraf dist",
+    "prestart": "npm run build",
+    "start": "func start",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "test": "echo \"no tests configured\" && exit 0"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.5.1",
+    "@prisma/client": "^5.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "prisma": "^5.20.0",
+    "rimraf": "^5.0.7",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  }
+}
