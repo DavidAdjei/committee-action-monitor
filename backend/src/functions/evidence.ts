@@ -74,6 +74,21 @@ async function downloadEvidence(req: HttpRequest, _ctx: InvocationContext): Prom
 
     await requireViewCommittee(user, evidence.actionUpdate.actionPoint.committeeId);
 
+    // Evidence must pass malware scanning before download (docs §9).
+    // PENDING is allowed only when explicitly enabled for local/dev demos.
+    const allowPending =
+      process.env.DEV_AUTH_ENABLED === "true" && process.env.EVIDENCE_ALLOW_PENDING_DOWNLOAD === "true";
+    if (evidence.scanResult === "INFECTED") {
+      throw Errors.forbidden("This file failed malware scanning and cannot be downloaded.");
+    }
+    if (evidence.scanResult !== "CLEAN" && !(allowPending && evidence.scanResult === "PENDING")) {
+      throw Errors.conflict(
+        evidence.scanResult === "PENDING"
+          ? "This file is still being scanned. Try again shortly."
+          : "This file is not available for download.",
+      );
+    }
+
     const buffer = await readEvidenceFile(evidence.storageKey);
     return {
       status: 200,

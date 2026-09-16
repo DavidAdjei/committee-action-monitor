@@ -3,6 +3,9 @@ import { Video } from "lucide-react";
 import { Modal, ModalActions } from "@/components/Modal";
 import { endpoints } from "@/api/endpoints";
 import { useFlash } from "@/state/toastContext";
+import { useAuth } from "@/state/authContext";
+import { canCreateMeeting } from "@/lib/permissions";
+import { ApiClientError } from "@/api/client";
 
 export function CreateMeetingModal({
   committeeId,
@@ -16,6 +19,7 @@ export function CreateMeetingModal({
   onCreated: () => void;
 }) {
   const flash = useFlash();
+  const { me } = useAuth();
   const [reference, setReference] = useState("");
   const [title, setTitle] = useState("October Committee Meeting");
   const [date, setDate] = useState("");
@@ -29,6 +33,10 @@ export function CreateMeetingModal({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!canCreateMeeting(me, committeeId)) {
+      setError("Only the committee Chairperson or Secretary may create meetings.");
+      return;
+    }
     if (!date) return;
     setSubmitting(true);
     setError(null);
@@ -49,8 +57,12 @@ export function CreateMeetingModal({
       );
       onCreated();
       onClose();
-    } catch (err: any) {
-      setError(err.message ?? "Could not save the meeting.");
+    } catch (err: unknown) {
+      if (err instanceof ApiClientError && err.isForbidden) {
+        setError("You are not authorized to create meetings in this committee.");
+      } else {
+        setError((err as Error)?.message ?? "Could not save the meeting.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -64,7 +76,7 @@ export function CreateMeetingModal({
       wide
     >
       <form onSubmit={submit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="field-label">
             Meeting title
             <input required className="field-input" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -82,7 +94,7 @@ export function CreateMeetingModal({
             </small>
           </label>
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="field-label">
             Date
             <input type="date" required className="field-input" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -126,7 +138,7 @@ export function CreateMeetingModal({
           <input type="checkbox" className="mt-1" checked={teams} onChange={(e) => setTeams(e.target.checked)} />
           <Video className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
           <span className="text-sm">
-            <b className="block text-slate-800">Create an online Microsoft Teams meeting</b>
+            <b className="block text-slate-800 dark:text-slate-100">Create an online Microsoft Teams meeting</b>
             <small className="text-slate-500">
               Requires the Bank's Microsoft 365 connection. Attendees will receive the Teams invitation after
               authorization.

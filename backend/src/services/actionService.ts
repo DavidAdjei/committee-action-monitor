@@ -8,7 +8,7 @@ import type { ActionStatus, StakeholderType } from "@prisma/client";
 /** Optimistic-concurrency updates throw P2025 when the version has moved on. */
 function asConflictOnMissingRecord(err: unknown): never {
   if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
-    throw Errors.conflict(
+    throw Errors.versionConflict(
       "This action point was updated by someone else just now. Reload it and try again.",
     );
   }
@@ -137,6 +137,8 @@ export interface RecordActionUpdateInput {
   revisedDeadline?: Date;
   evidenceLink?: string;
   evidenceFiles?: { storageKey: string; filename: string; mediaType: string; sizeBytes: number }[];
+  /** Client-supplied optimistic concurrency token (ActionDetail.version). */
+  expectedVersion?: number;
 }
 
 /**
@@ -147,8 +149,10 @@ export interface RecordActionUpdateInput {
 export async function recordActionUpdate(input: RecordActionUpdateInput) {
   const action = await prisma.actionPoint.findUnique({ where: { id: input.actionPointId } });
   if (!action) throw Errors.notFound("Action point");
-  if (["COMPLETED", "CANCELLED"].includes(action.status)) {
-    throw Errors.conflict("This action is already closed and cannot be updated.");
+  const isTerminal = ["COMPLETED", "CANCELLED"].includes(action.status);
+  // Normal updates cannot touch closed actions. Reopen is a dedicated path (see reopenAction).
+  if (isTerminal) {
+    throw Errors.conflict("This action is already closed. Use reopen if governance allows it.");
   }
   if (input.progress < 0 || input.progress > 100) {
     throw Errors.badRequest("Progress must be between 0 and 100.");
@@ -162,6 +166,13 @@ export async function recordActionUpdate(input: RecordActionUpdateInput) {
     throw Errors.badRequest("Evidence (a file or a link) is required to submit a completed action.");
   }
   const nextStatus: ActionStatus = assertingComplete ? "PENDING_VERIFICATION" : input.status;
+
+  const expectedVersion = input.expectedVersion ?? action.version;
+  if (input.expectedVersion !== undefined && input.expectedVersion !== action.version) {
+    throw Errors.versionConflict(
+      "This action point was updated by someone else. Reload it and try again.",
+    );
+  }
 
   return prisma.$transaction(async (tx) => {
     const update = await tx.actionUpdate.create({
@@ -185,17 +196,24 @@ export async function recordActionUpdate(input: RecordActionUpdateInput) {
           mediaType: f.mediaType,
           sizeBytes: f.sizeBytes,
           uploadedById: input.authorId,
+          scanResult: process.env.DEV_AUTH_ENABLED === "true" ? "CLEAN" : "PENDING",
         })),
       });
     }
 
     const updated = await tx.actionPoint
       .update({
-        where: { id: input.actionPointId, version: action.version },
+        where: { id: input.actionPointId, version: expectedVersion },
         data: {
           status: nextStatus,
           progress: assertingComplete ? 100 : input.progress,
-          statusReason: nextStatus === "OVERDUE" ? input.note : action.statusReason,
+          // OVERDUE from the UI is a reported blocker; deadline-driven overdue is set by the scheduler.
+          statusReason:
+            nextStatus === "OVERDUE"
+              ? (input.note.startsWith("[Blocker]") ? input.note : `[Blocker] ${input.note}`)
+              : nextStatus === "CANCELLED"
+                ? input.note
+                : action.statusReason,
           revisedDeadline: input.revisedDeadline ?? action.revisedDeadline,
           version: { increment: 1 },
         },
@@ -243,6 +261,7 @@ export async function verifyActionEvidence(params: {
   verifiedById: number;
   approve: boolean;
   note?: string;
+  expectedVersion?: number;
 }) {
   const action = await prisma.actionPoint.findUnique({ where: { id: params.actionPointId } });
   if (!action) throw Errors.notFound("Action point");
@@ -250,10 +269,43 @@ export async function verifyActionEvidence(params: {
     throw Errors.conflict("Only an action pending verification can be verified.");
   }
 
+  if (params.approve) {
+    // Completion evidence must be present and not infected (docs §3.7 / §9).
+    const latestWithFiles = await prisma.actionUpdate.findFirst({
+      where: { actionPointId: params.actionPointId },
+      orderBy: { createdAt: "desc" },
+      include: { evidenceFiles: true },
+    });
+    const files = latestWithFiles?.evidenceFiles ?? [];
+    const hasLink = Boolean(latestWithFiles?.evidenceLink);
+    if (files.length === 0 && !hasLink) {
+      throw Errors.badRequest("Cannot approve completion without evidence files or an evidence link.");
+    }
+    if (files.some((f) => f.scanResult === "INFECTED")) {
+      throw Errors.conflict("Cannot approve while evidence failed malware scanning.");
+    }
+    const allowPending =
+      process.env.DEV_AUTH_ENABLED === "true" && process.env.EVIDENCE_ALLOW_PENDING_DOWNLOAD === "true";
+    if (
+      files.length > 0 &&
+      files.some((f) => f.scanResult !== "CLEAN") &&
+      !(allowPending && files.every((f) => f.scanResult === "PENDING" || f.scanResult === "CLEAN"))
+    ) {
+      throw Errors.conflict("Evidence is still scanning or not clean. Wait for a clean scan before approving.");
+    }
+  }
+
+  const expectedVersion = params.expectedVersion ?? action.version;
+  if (params.expectedVersion !== undefined && params.expectedVersion !== action.version) {
+    throw Errors.versionConflict(
+      "This action point was updated by someone else. Reload it and try again.",
+    );
+  }
+
   return prisma.$transaction(async (tx) => {
     const updated = await tx.actionPoint
       .update({
-        where: { id: action.id, version: action.version },
+        where: { id: action.id, version: expectedVersion },
         data: params.approve
           ? {
               status: "COMPLETED",
@@ -297,5 +349,244 @@ export async function verifyActionEvidence(params: {
     });
 
     return updated;
+  });
+}
+
+/**
+ * Formal reopen of a Completed or Cancelled action (docs §5 — terminal unless
+ * formally reopened). Restricted to committee officers at the HTTP layer.
+ */
+export async function reopenAction(params: {
+  actionPointId: number;
+  reopenedById: number;
+  note: string;
+  expectedVersion?: number;
+}) {
+  const action = await prisma.actionPoint.findUnique({ where: { id: params.actionPointId } });
+  if (!action) throw Errors.notFound("Action point");
+  if (!["COMPLETED", "CANCELLED"].includes(action.status)) {
+    throw Errors.conflict("Only completed or cancelled actions can be reopened.");
+  }
+  if (!params.note?.trim()) {
+    throw Errors.badRequest("A reason for reopening is required.");
+  }
+
+  const expectedVersion = params.expectedVersion ?? action.version;
+  if (params.expectedVersion !== undefined && params.expectedVersion !== action.version) {
+    throw Errors.versionConflict(
+      "This action point was updated by someone else. Reload it and try again.",
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.actionUpdate.create({
+      data: {
+        actionPointId: params.actionPointId,
+        authorId: params.reopenedById,
+        status: "IN_PROGRESS",
+        progress: action.progress < 100 ? action.progress : 0,
+        note: params.note.trim(),
+      },
+    });
+
+    const updated = await tx.actionPoint
+      .update({
+        where: { id: action.id, version: expectedVersion },
+        data: {
+          status: "IN_PROGRESS",
+          completedAt: null,
+          verifiedById: null,
+          verifiedAt: null,
+          statusReason: params.note.trim(),
+          version: { increment: 1 },
+        },
+      })
+      .catch(asConflictOnMissingRecord);
+
+    const stakeholders = await tx.actionStakeholder.findMany({
+      where: { actionPointId: action.id },
+      select: { userId: true },
+    });
+
+    await tx.notification.createMany({
+      data: buildActionNotifications({
+        actionPointId: action.id,
+        recipientIds: stakeholders.map((s) => s.userId),
+        notificationType: "STATUS_CHANGE",
+      }),
+      skipDuplicates: true,
+    });
+
+    await tx.auditEvent.create({
+      data: auditRow({
+        actorUserId: params.reopenedById,
+        action: "action_point.reopen",
+        resourceType: "action_point",
+        resourceId: action.id,
+        actionPointId: action.id,
+        before: { status: action.status },
+        after: { status: "IN_PROGRESS", note: params.note.trim() },
+        result: "SUCCESS",
+      }),
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * Structural edit of an action (title, description, owner, deadline, priority).
+ * Chairperson/Secretary only — enforced at the HTTP layer.
+ */
+export async function updateActionMetadata(params: {
+  actionPointId: number;
+  actorUserId: number;
+  expectedVersion?: number;
+  title?: string;
+  description?: string | null;
+  ownerId?: number;
+  deadline?: Date;
+  priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  minutesReference?: string | null;
+}) {
+  const action = await prisma.actionPoint.findUnique({ where: { id: params.actionPointId } });
+  if (!action) throw Errors.notFound("Action point");
+  if (["COMPLETED", "CANCELLED"].includes(action.status)) {
+    throw Errors.conflict("Closed actions cannot be modified. Reopen first if governance allows.");
+  }
+
+  const expectedVersion = params.expectedVersion ?? action.version;
+  if (params.expectedVersion !== undefined && params.expectedVersion !== action.version) {
+    throw Errors.versionConflict(
+      "This action point was updated by someone else. Reload it and try again.",
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.actionPoint
+      .update({
+        where: { id: action.id, version: expectedVersion },
+        data: {
+          title: params.title ?? action.title,
+          description: params.description !== undefined ? params.description : action.description,
+          ownerId: params.ownerId ?? action.ownerId,
+          deadline: params.deadline ?? action.deadline,
+          priority: params.priority ?? action.priority,
+          minutesReference:
+            params.minutesReference !== undefined ? params.minutesReference : action.minutesReference,
+          version: { increment: 1 },
+        },
+      })
+      .catch(asConflictOnMissingRecord);
+
+    await tx.auditEvent.create({
+      data: auditRow({
+        actorUserId: params.actorUserId,
+        action: "action_point.modify",
+        resourceType: "action_point",
+        resourceId: action.id,
+        actionPointId: action.id,
+        committeeId: action.committeeId,
+        before: {
+          title: action.title,
+          ownerId: action.ownerId,
+          deadline: action.deadline,
+          priority: action.priority,
+        },
+        after: {
+          title: updated.title,
+          ownerId: updated.ownerId,
+          deadline: updated.deadline,
+          priority: updated.priority,
+        },
+        result: "SUCCESS",
+      }),
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * Soft-close via cancel semantics, or hard-remove if still OPEN with no updates.
+ * Prefer CANCELLED for auditability; DELETE only when never progressed.
+ */
+export async function deleteActionPoint(params: {
+  actionPointId: number;
+  actorUserId: number;
+  expectedVersion?: number;
+  hardDelete?: boolean;
+}) {
+  const action = await prisma.actionPoint.findUnique({
+    where: { id: params.actionPointId },
+    include: { _count: { select: { updates: true } } },
+  });
+  if (!action) throw Errors.notFound("Action point");
+
+  const expectedVersion = params.expectedVersion ?? action.version;
+  if (params.expectedVersion !== undefined && params.expectedVersion !== action.version) {
+    throw Errors.versionConflict(
+      "This action point was updated by someone else. Reload it and try again.",
+    );
+  }
+
+  // Prefer cancel over hard delete when there is history
+  if (!params.hardDelete || action._count.updates > 0 || action.status !== "OPEN") {
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.actionPoint
+        .update({
+          where: { id: action.id, version: expectedVersion },
+          data: {
+            status: "CANCELLED",
+            statusReason: "Cancelled by committee officers",
+            version: { increment: 1 },
+          },
+        })
+        .catch(asConflictOnMissingRecord);
+
+      await tx.actionUpdate.create({
+        data: {
+          actionPointId: action.id,
+          authorId: params.actorUserId,
+          status: "CANCELLED",
+          progress: action.progress,
+          note: "Action cancelled by committee officers",
+        },
+      });
+
+      await tx.auditEvent.create({
+        data: auditRow({
+          actorUserId: params.actorUserId,
+          action: "action_point.cancel",
+          resourceType: "action_point",
+          resourceId: action.id,
+          actionPointId: action.id,
+          committeeId: action.committeeId,
+          before: { status: action.status },
+          after: { status: "CANCELLED" },
+          result: "SUCCESS",
+        }),
+      });
+
+      return { mode: "cancelled" as const, action: updated };
+    });
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.actionStakeholder.deleteMany({ where: { actionPointId: action.id } });
+    await tx.notification.deleteMany({ where: { actionPointId: action.id } });
+    await tx.actionPoint.delete({ where: { id: action.id } });
+    await tx.auditEvent.create({
+      data: auditRow({
+        actorUserId: params.actorUserId,
+        action: "action_point.delete",
+        resourceType: "action_point",
+        resourceId: action.id,
+        committeeId: action.committeeId,
+        before: { referenceNo: action.referenceNo, title: action.title },
+        result: "SUCCESS",
+      }),
+    });
+    return { mode: "deleted" as const, action: null };
   });
 }

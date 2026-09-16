@@ -2,30 +2,34 @@ import { AlertTriangle, CheckCircle2, CircleDot, Clock3, FileCheck2 } from "luci
 import type { ActionStatus } from "@/types";
 
 const STATUS_STYLES: Record<ActionStatus, { label: string; className: string; icon: JSX.Element }> = {
-  OPEN: { label: "Open", className: "bg-slate-100 text-slate-700", icon: <CircleDot className="h-3.5 w-3.5" /> },
+  OPEN: {
+    label: "Open",
+    className: "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-100",
+    icon: <CircleDot className="h-3.5 w-3.5" />,
+  },
   IN_PROGRESS: {
     label: "In Progress",
-    className: "bg-blue-50 text-blue-700",
+    className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-200",
     icon: <CircleDot className="h-3.5 w-3.5" />,
   },
   OVERDUE: {
-    label: "Overdue",
-    className: "bg-red-50 text-red-700",
+    label: "Overdue / Blocked",
+    className: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-200",
     icon: <AlertTriangle className="h-3.5 w-3.5" />,
   },
   PENDING_VERIFICATION: {
     label: "Pending Verification",
-    className: "bg-amber-50 text-amber-700",
+    className: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
     icon: <FileCheck2 className="h-3.5 w-3.5" />,
   },
   COMPLETED: {
     label: "Completed",
-    className: "bg-emerald-50 text-emerald-700",
+    className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
     icon: <CheckCircle2 className="h-3.5 w-3.5" />,
   },
   CANCELLED: {
     label: "Cancelled",
-    className: "bg-slate-100 text-slate-500",
+    className: "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300",
     icon: <CircleDot className="h-3.5 w-3.5" />,
   },
 };
@@ -44,7 +48,7 @@ export function DueBadge({ deadline, status }: { deadline: string; status: Actio
   if (status === "COMPLETED" || status === "CANCELLED") return null;
   const days = Math.ceil((new Date(deadline).getTime() - Date.now()) / 86_400_000);
   if (days < 0) {
-    return <span className="text-xs font-medium text-red-600">{Math.abs(days)} days overdue</span>;
+    return <span className="text-xs font-medium text-red-600 dark:text-red-400">{Math.abs(days)} days overdue</span>;
   }
   return (
     <span className="text-xs text-slate-500">

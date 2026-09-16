@@ -2,7 +2,8 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/fu
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
 import { requireViewCommittee, requireCommitteeOfficer } from "../lib/authorize";
-import { ok, errorResponse, preflight, Errors } from "../lib/http";
+import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
+import { recordDenied } from "../services/auditService";
 import { createActionPoint } from "../services/actionService";
 
 async function listActions(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
@@ -73,9 +74,12 @@ function serializeAction(a: any) {
 
 async function createActionHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
+  let actorUserId: number | null = null;
+  let committeeId: number | undefined;
   try {
     const user = await requireUser(req);
-    const committeeId = Number(req.params.id);
+    actorUserId = user.id;
+    committeeId = Number(req.params.id);
     if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
 
     // Server re-check per section 4.3 step 3 — the committee field is fixed
@@ -116,6 +120,15 @@ async function createActionHandler(req: HttpRequest, _ctx: InvocationContext): P
 
     return ok(action, 201);
   } catch (err) {
+    if (err instanceof ApiError && err.status === 403) {
+      await recordDenied({
+        actorUserId: actorUserId,
+        action: "action_point.create",
+        resourceType: "action_point",
+        committeeId,
+        reason: err.message,
+      });
+    }
     return errorResponse(err);
   }
 }

@@ -1,8 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
-import { FileText, Upload } from "lucide-react";
+import { FileText } from "lucide-react";
 import { Modal, ModalActions } from "@/components/Modal";
 import { endpoints } from "@/api/endpoints";
+import { ApiClientError } from "@/api/client";
 import { useFlash } from "@/state/toastContext";
+import { useAuth } from "@/state/authContext";
+import { canCreateMinutes } from "@/lib/permissions";
 import { StatusPill } from "@/components/StatusBits";
 import type { ActionListItem, Meeting } from "@/types";
 
@@ -21,17 +24,20 @@ export function CreateMinutesModal({
   committeeId: number;
   committeeName: string;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (minutesId?: number) => void;
 }) {
   const flash = useFlash();
+  const { me } = useAuth();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [meetingId, setMeetingId] = useState<number | "">("");
   const [source, setSource] = useState("LATEST_MEETING");
   const [actions, setActions] = useState<ActionListItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [discussion, setDiscussion] = useState("");
-  const [notifyOnIssue, setNotifyOnIssue] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [decisions, setDecisions] = useState("");
+  const [resolutions, setResolutions] = useState("");
+  const [documentUrl, setDocumentUrl] = useState("");
+  const [submitting, setSubmitting] = useState<"draft" | "issue" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,8 +48,7 @@ export function CreateMinutesModal({
   }, [committeeId]);
 
   useEffect(() => {
-    const statusFilter = source === "ALL_OPEN_ACTIONS" ? undefined : undefined;
-    endpoints.actionsForCommittee(committeeId, statusFilter ? { status: statusFilter } : undefined).then((list) => {
+    endpoints.actionsForCommittee(committeeId).then((list) => {
       const eligible =
         source === "ALL_OPEN_ACTIONS"
           ? list.filter((a) => !["COMPLETED", "CANCELLED"].includes(a.status))
@@ -62,38 +67,72 @@ export function CreateMinutesModal({
     });
   };
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!meetingId || selectedIds.size === 0) return;
-    setSubmitting(true);
+  const composeDiscussion = () => {
+    const parts: string[] = [];
+    if (discussion.trim()) parts.push(`Discussion:\n${discussion.trim()}`);
+    if (decisions.trim()) parts.push(`Decisions:\n${decisions.trim()}`);
+    if (resolutions.trim()) parts.push(`Resolutions:\n${resolutions.trim()}`);
+    return parts.join("\n\n");
+  };
+
+  const save = async (mode: "draft" | "issue") => {
+    if (!meetingId || selectedIds.size === 0) {
+      setError("Select a meeting and at least one action point.");
+      return;
+    }
+    if (!canCreateMinutes(me, committeeId)) {
+      setError("Only the committee Chairperson or Secretary may create minutes.");
+      return;
+    }
+    const bodyDiscussion = composeDiscussion();
+    if (!bodyDiscussion) {
+      setError("Enter discussion, decisions or resolutions.");
+      return;
+    }
+
+    setSubmitting(mode);
     setError(null);
     try {
       const minutes = await endpoints.createMinutes(Number(meetingId), {
         sourcePopulation: source,
-        discussion,
+        discussion: bodyDiscussion,
         includedActionPointIds: Array.from(selectedIds),
+        documentUrl: documentUrl.trim() || undefined,
       });
-      if (notifyOnIssue) {
-        await endpoints.issueMinutes((minutes as any).id);
+      if (mode === "issue") {
+        await endpoints.issueMinutes(minutes.id, {
+          documentUrl: documentUrl.trim() || undefined,
+        });
+        flash("Minutes issued — stakeholders notified");
+      } else {
+        flash("Draft minutes saved with action-status snapshots");
       }
-      flash("Minutes created with linked action-point statuses");
-      onCreated();
+      onCreated(minutes.id);
       onClose();
-    } catch (err: any) {
-      setError(err.message ?? "Could not create the minutes.");
+    } catch (err: unknown) {
+      if (err instanceof ApiClientError && err.isForbidden) {
+        setError("You are not authorized to create minutes for this committee.");
+      } else {
+        setError((err as Error)?.message ?? "Could not create the minutes.");
+      }
     } finally {
-      setSubmitting(false);
+      setSubmitting(null);
     }
+  };
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    void save("issue");
   };
 
   return (
     <Modal
       title="Create meeting minutes"
-      subtitle={`${committeeName} · Build minutes from meeting records and action statuses`}
+      subtitle={`${committeeName} · Capture discussion and freeze action statuses`}
       onClose={onClose}
       wide
     >
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={onSubmit} className="space-y-4">
         <label className="field-label">
           Meeting
           <select
@@ -111,8 +150,8 @@ export function CreateMinutesModal({
         </label>
 
         <div>
-          <b className="mb-1.5 block text-sm text-slate-700">Include action-point status from</b>
-          <div className="grid grid-cols-3 gap-2">
+          <b className="mb-1.5 block text-sm text-slate-700 dark:text-slate-300">Include action-point status from</b>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {SOURCE_OPTIONS.map((s) => (
               <button
                 type="button"
@@ -120,8 +159,8 @@ export function CreateMinutesModal({
                 onClick={() => setSource(s.value)}
                 className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
                   source === s.value
-                    ? "border-brand-500 bg-brand-50 text-brand-800"
-                    : "border-slate-200 text-slate-600 hover:border-slate-300"
+                    ? "border-brand-500 bg-brand-50 text-brand-800 dark:bg-brand-950 dark:text-brand-200"
+                    : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-600"
                 }`}
               >
                 {s.label}
@@ -130,14 +169,14 @@ export function CreateMinutesModal({
           </div>
         </div>
 
-        <div className="rounded-lg border border-slate-200 p-3">
+        <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
           <div className="mb-2 flex items-center justify-between text-sm">
-            <b className="text-slate-800">Action status summary</b>
+            <b className="text-slate-800 dark:text-slate-100">Action status summary</b>
             <span className="text-slate-500">{selectedIds.size} actions selected</span>
           </div>
           <div className="max-h-52 space-y-1.5 overflow-y-auto">
             {actions.map((a) => (
-              <label key={a.id} className="flex items-center gap-2.5 rounded-md p-1.5 hover:bg-slate-50">
+              <label key={a.id} className="flex items-center gap-2.5 rounded-md p-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
                 <input type="checkbox" checked={selectedIds.has(a.id)} onChange={() => toggle(a.id)} />
                 <span className="flex-1 text-sm">
                   <b>
@@ -153,37 +192,70 @@ export function CreateMinutesModal({
             ))}
             {actions.length === 0 && <p className="py-4 text-center text-sm text-slate-400">No eligible actions</p>}
           </div>
+          <p className="mt-2 text-[11px] text-slate-400">
+            Selected statuses are stored as immutable snapshots when minutes are created.
+          </p>
         </div>
 
         <label className="field-label">
-          Discussion, decisions and resolutions
+          Discussion
           <textarea
-            required
-            className="field-input min-h-[100px]"
-            placeholder="Record discussions, decisions, resolutions and any new action points"
+            className="field-input min-h-[72px]"
+            placeholder="Key points raised in the meeting"
             value={discussion}
             onChange={(e) => setDiscussion(e.target.value)}
           />
         </label>
-
-        <label className="flex items-center gap-2 rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-500">
-          <Upload className="h-4 w-4" />
-          Attach draft or signed minutes (optional) — wire to SharePoint once Graph credentials are configured.
+        <label className="field-label">
+          Decisions
+          <textarea
+            className="field-input min-h-[64px]"
+            placeholder="Decisions agreed by the committee"
+            value={decisions}
+            onChange={(e) => setDecisions(e.target.value)}
+          />
+        </label>
+        <label className="field-label">
+          Resolutions
+          <textarea
+            className="field-input min-h-[64px]"
+            placeholder="Formal resolutions and follow-ups"
+            value={resolutions}
+            onChange={(e) => setResolutions(e.target.value)}
+          />
         </label>
 
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={notifyOnIssue} onChange={(e) => setNotifyOnIssue(e.target.checked)} />
-          Issue immediately and notify the Chairperson, Secretary, members and action owners.
+        <label className="field-label">
+          Minutes document URL (optional)
+          <input
+            type="url"
+            className="field-input"
+            placeholder="https://sharepoint.example/… or controlled document link"
+            value={documentUrl}
+            onChange={(e) => setDocumentUrl(e.target.value)}
+          />
+          <small className="font-normal text-slate-400">
+            Attach a SharePoint / controlled link. Template generation can fill this later.
+          </small>
         </label>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
         <ModalActions>
-          <button type="button" className="btn" onClick={onClose}>
-            Save draft
+          <button type="button" className="btn" onClick={onClose} disabled={!!submitting}>
+            Cancel
           </button>
-          <button type="submit" className="btn-primary" disabled={submitting}>
-            <FileText className="h-4 w-4" /> {submitting ? "Saving…" : "Create minutes"}
+          <button
+            type="button"
+            className="btn"
+            disabled={!!submitting}
+            onClick={() => void save("draft")}
+          >
+            {submitting === "draft" ? "Saving…" : "Save draft"}
+          </button>
+          <button type="submit" className="btn-primary" disabled={!!submitting}>
+            <FileText className="h-4 w-4" />
+            {submitting === "issue" ? "Issuing…" : "Create & issue"}
           </button>
         </ModalActions>
       </form>

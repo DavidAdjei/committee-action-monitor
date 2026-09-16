@@ -1,7 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
-import { requireViewCommittee, requireCentralCommittee } from "../lib/authorize";
+import { requireViewCommittee, requireCentralCommittee, requireCommitteeOfficer, isCommitteeOfficer } from "../lib/authorize";
 import { ok, errorResponse, preflight, Errors } from "../lib/http";
 import { committeeSummary } from "../services/reportService";
 import { addCommitteeMember, setCommitteeChair } from "../services/committeeService";
@@ -33,7 +33,11 @@ async function committeeDetail(req: HttpRequest, _ctx: InvocationContext): Promi
     const myRole = myMembership?.role ?? null;
     const canEdit = myRole === "CHAIRPERSON" || myRole === "SECRETARY";
     const isCentralCommitteeViewOnly = Boolean(user.isCentralCommittee && !canEdit);
-    const canManageCommittee = Boolean(user.isCentralCommittee || user.isAdmin);
+    const officer = await isCommitteeOfficer(user.id, id);
+    // Leadership changes & bank-wide governance: admin / central
+    const canManageCommittee = Boolean(user.isAdmin || user.isCentralCommittee);
+    // Add/change members & roles: chair/secretary of this committee, or admin
+    const canManageMembers = Boolean(user.isAdmin || officer);
 
     const [summary] = await committeeSummary([id]);
 
@@ -55,6 +59,7 @@ async function committeeDetail(req: HttpRequest, _ctx: InvocationContext): Promi
       canEdit,
       isCentralCommitteeViewOnly,
       canManageCommittee,
+      canManageMembers,
       members: committee.memberships.map((m) => ({
         userId: m.userId,
         fullName: m.user.fullName,
@@ -83,7 +88,10 @@ async function addMemberHandler(req: HttpRequest, _ctx: InvocationContext): Prom
     const committeeId = Number(req.params.id);
     if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
 
-    await requireCentralCommittee(user);
+    // Chairperson/Secretary may add members and assign roles; admins always may.
+    if (!user.isAdmin) {
+      await requireCommitteeOfficer(user, committeeId);
+    }
 
     const body = (await req.json()) as {
       userId?: number;
@@ -111,7 +119,9 @@ async function setChairHandler(req: HttpRequest, _ctx: InvocationContext): Promi
     const committeeId = Number(req.params.id);
     if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
 
-    await requireCentralCommittee(user);
+    if (!user.isAdmin) {
+      await requireCommitteeOfficer(user, committeeId);
+    }
 
     const body = (await req.json()) as {
       chairpersonId?: number;

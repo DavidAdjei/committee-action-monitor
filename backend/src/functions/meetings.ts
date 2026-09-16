@@ -2,7 +2,8 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/fu
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
 import { requireViewCommittee, requireCommitteeOfficer } from "../lib/authorize";
-import { ok, errorResponse, preflight, Errors } from "../lib/http";
+import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
+import { recordDenied } from "../services/auditService";
 import { createMeeting } from "../services/meetingService";
 
 async function listMeetings(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
@@ -25,9 +26,12 @@ async function listMeetings(req: HttpRequest, _ctx: InvocationContext): Promise<
 
 async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
+  let actorUserId: number | null = null;
+  let committeeId: number | undefined;
   try {
     const user = await requireUser(req);
-    const committeeId = Number(req.params.id);
+    actorUserId = user.id;
+    committeeId = Number(req.params.id);
     if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
 
     // Server-side re-check: UI visibility is not a security control.
@@ -63,6 +67,15 @@ async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): 
     // attachTeamsEvent(meeting.id, eventId, joinUrl) — see meetingService.ts.
     return ok(meeting, 201);
   } catch (err) {
+    if (err instanceof ApiError && err.status === 403) {
+      await recordDenied({
+        actorUserId: actorUserId,
+        action: "meeting.create",
+        resourceType: "meeting",
+        committeeId,
+        reason: err.message,
+      });
+    }
     return errorResponse(err);
   }
 }
@@ -76,9 +89,73 @@ async function handleMeetings(req: HttpRequest, _ctx: InvocationContext): Promis
   return errorResponse(new Error("Method not allowed"));
 }
 
+
+async function meetingDetailHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const meetingId = Number(req.params.meetingId);
+    if (!Number.isInteger(meetingId)) throw Errors.badRequest("Invalid meeting id.");
+
+    const meeting = await prisma.meeting.findUnique({
+      where: { id: meetingId },
+      include: {
+        committee: { select: { id: true, name: true, code: true } },
+        createdBy: { select: { id: true, fullName: true } },
+        minutes: {
+          select: { id: true, status: true, createdAt: true, issuedAt: true },
+          orderBy: { createdAt: "desc" },
+        },
+        actionPoints: {
+          select: {
+            id: true,
+            referenceNo: true,
+            title: true,
+            status: true,
+            progress: true,
+            owner: { select: { id: true, fullName: true } },
+          },
+          orderBy: { deadline: "asc" },
+          take: 50,
+        },
+      },
+    });
+    if (!meeting) throw Errors.notFound("Meeting");
+    await requireViewCommittee(user, meeting.committeeId);
+
+    return ok({
+      id: meeting.id,
+      committeeId: meeting.committeeId,
+      committee: meeting.committee,
+      reference: meeting.reference,
+      title: meeting.title,
+      startsAt: meeting.startsAt,
+      endsAt: meeting.endsAt,
+      venue: meeting.venue,
+      agenda: meeting.agenda,
+      teamsRequested: meeting.teamsRequested,
+      teamsEventId: meeting.teamsEventId,
+      teamsJoinUrl: meeting.teamsJoinUrl,
+      createdBy: meeting.createdBy,
+      createdAt: meeting.createdAt,
+      minutes: meeting.minutes,
+      actionPoints: meeting.actionPoints,
+    });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
 app.http("meetings", {
   methods: ["GET", "POST", "OPTIONS"],
   authLevel: "anonymous",
   route: "committees/{id}/meetings",
   handler: handleMeetings,
+});
+
+app.http("meetingDetail", {
+  methods: ["GET", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "meetings/{meetingId}",
+  handler: meetingDetailHandler,
 });

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Plus, Users } from "lucide-react";
 import { endpoints } from "@/api/endpoints";
 import { useAuth } from "@/state/authContext";
+import { canCreateCommittee } from "@/lib/permissions";
 import { AddCommitteeModal } from "@/components/modals/AddCommitteeModal";
 import { LoadingLogo } from "@/components/LoadingLogo";
 import type { CommitteeSummary } from "@/types";
@@ -28,12 +29,12 @@ export default function Committees() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-ink">Committees</h1>
+          <h1 className="text-xl font-bold text-ink dark:text-white">Committees</h1>
           <p className="text-sm text-slate-500">
             {me?.isCentralCommittee ? "Every committee across the Bank." : "Committees you are a member of."}
           </p>
         </div>
-        {(me?.isCentralCommittee || me?.isAdmin) && (
+        {canCreateCommittee(me) && (
           <button className="btn-primary" onClick={() => setShowAdd(true)}>
             <Plus className="h-4 w-4" /> New committee
           </button>
@@ -45,28 +46,28 @@ export default function Committees() {
         <p className="card text-sm text-slate-400">No committees to show yet.</p>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {committees.map((c) => (
           <button
             key={c.id}
             onClick={() => navigate(`/committees/${c.id}`)}
             className="card text-left transition hover:border-brand-300 hover:shadow-md"
           >
-            <div className="mb-3 flex items-start justify-between">
-              <div>
-                <h3 className="font-bold text-ink">{c.name}</h3>
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="font-bold text-ink dark:text-white truncate">{c.name}</h3>
                 <p className="text-xs text-slate-400">{c.code} · {c.meetingFrequency ?? "—"}</p>
               </div>
               {c.myRole && (
-                <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">
+                <span className="shrink-0 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 dark:text-brand-300">
                   {c.myRole === "CHAIRPERSON" ? "Chairperson" : c.myRole === "SECRETARY" ? "Secretary" : "Member"}
                 </span>
               )}
             </div>
 
-            <div className="mb-3 grid grid-cols-4 gap-2 text-center text-xs">
-              <div className="rounded-lg bg-slate-50 p-2">
-                <b className="block text-sm text-ink">{c.totalActions}</b>Total
+            <div className="mb-3 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
+              <div className="rounded-lg bg-slate-50 p-2  text-black">
+                <b className="block text-sm text-black">{c.totalActions}</b>Total
               </div>
               <div className="rounded-lg bg-blue-50 p-2 text-blue-700">
                 <b className="block text-sm">{c.activeActions}</b>Active

@@ -1,8 +1,9 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
-import { loadMemberships, requireCentralCommittee } from "../lib/authorize";
-import { ok, errorResponse, preflight, Errors } from "../lib/http";
+import { loadMemberships, requireAdmin } from "../lib/authorize";
+import { recordDenied } from "../services/auditService";
+import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
 import { committeeSummary } from "../services/reportService";
 import { createCommittee } from "../services/committeeService";
 
@@ -49,9 +50,13 @@ async function listCommittees(req: HttpRequest, _ctx: InvocationContext): Promis
 
 async function createCommitteeHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
+  let actorUserId: number | null = null;
   try {
     const user = await requireUser(req);
-    await requireCentralCommittee(user);
+    actorUserId = user.id;
+    // Docs §2 / §3.4: only Central Committee Administrator may create committees
+    // (ordinary Central members are read-only).
+    await requireAdmin(user);
 
     const body = (await req.json()) as {
       name?: string;
@@ -84,6 +89,14 @@ async function createCommitteeHandler(req: HttpRequest, _ctx: InvocationContext)
 
     return ok(committee, 201);
   } catch (err) {
+    if (err instanceof ApiError && err.status === 403) {
+      await recordDenied({
+        actorUserId: actorUserId,
+        action: "committee.create",
+        resourceType: "committee",
+        reason: err.message,
+      });
+    }
     return errorResponse(err);
   }
 }

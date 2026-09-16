@@ -19,7 +19,10 @@ async function listNotifications(req: HttpRequest, _ctx: InvocationContext): Pro
         id: n.id,
         notificationType: n.notificationType,
         deliveryStatus: n.deliveryStatus,
+        channel: n.channel,
+        errorMessage: n.errorMessage,
         scheduledFor: n.scheduledFor,
+        sentAt: n.sentAt,
         readAt: n.readAt,
         action: n.actionPoint
           ? {

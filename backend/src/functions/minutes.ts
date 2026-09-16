@@ -3,9 +3,18 @@ import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
 import { requireCommitteeOfficer, requireViewCommittee } from "../lib/authorize";
 import { ok, errorResponse, preflight, Errors } from "../lib/http";
-import { createDraftMinutes, issueMinutes, approveMinutes } from "../services/minutesService";
+import {
+  createDraftMinutes,
+  issueMinutes,
+  approveMinutes,
+  getMinutesDetail,
+  listMinutesForMeeting,
+} from "../services/minutesService";
 
-async function listMinutesForMeeting(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+async function listMinutesForMeetingHandler(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
   try {
     const user = await requireUser(req);
@@ -16,11 +25,7 @@ async function listMinutesForMeeting(req: HttpRequest, _ctx: InvocationContext):
     if (!meeting) throw Errors.notFound("Meeting");
     await requireViewCommittee(user, meeting.committeeId);
 
-    const minutes = await prisma.meetingMinutes.findMany({
-      where: { meetingId },
-      include: { snapshots: true },
-      orderBy: { createdAt: "desc" },
-    });
+    const minutes = await listMinutesForMeeting(meetingId);
     return ok(minutes);
   } catch (err) {
     return errorResponse(err);
@@ -42,6 +47,7 @@ async function createMinutesHandler(req: HttpRequest, _ctx: InvocationContext): 
       sourcePopulation?: "LATEST_MEETING" | "PREVIOUS_MEETING" | "ALL_OPEN_ACTIONS";
       discussion?: string;
       includedActionPointIds?: number[];
+      documentUrl?: string;
     };
     if (!body.discussion || !body.includedActionPointIds?.length) {
       throw Errors.badRequest("discussion and includedActionPointIds are required.");
@@ -53,9 +59,33 @@ async function createMinutesHandler(req: HttpRequest, _ctx: InvocationContext): 
       discussion: body.discussion,
       includedActionPointIds: body.includedActionPointIds,
       createdById: user.id,
+      documentUrl: body.documentUrl,
     });
 
-    return ok(minutes, 201);
+    // Return full detail so the UI can show snapshots immediately
+    const detail = await getMinutesDetail(minutes.id);
+    return ok(detail, 201);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+async function getMinutesHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const minutesId = Number(req.params.minutesId);
+    if (!Number.isInteger(minutesId)) throw Errors.badRequest("Invalid minutes id.");
+
+    const existing = await prisma.meetingMinutes.findUnique({
+      where: { id: minutesId },
+      include: { meeting: true },
+    });
+    if (!existing) throw Errors.notFound("Minutes");
+    await requireViewCommittee(user, existing.meeting.committeeId);
+
+    const detail = await getMinutesDetail(minutesId);
+    return ok(detail);
   } catch (err) {
     return errorResponse(err);
   }
@@ -76,8 +106,9 @@ async function issueMinutesHandler(req: HttpRequest, _ctx: InvocationContext): P
     await requireCommitteeOfficer(user, minutes.meeting.committeeId);
 
     const body = (await req.json().catch(() => ({}))) as { documentUrl?: string };
-    const updated = await issueMinutes(minutesId, user.id, body.documentUrl);
-    return ok(updated);
+    await issueMinutes(minutesId, user.id, body.documentUrl);
+    const detail = await getMinutesDetail(minutesId);
+    return ok(detail);
   } catch (err) {
     return errorResponse(err);
   }
@@ -97,8 +128,9 @@ async function approveMinutesHandler(req: HttpRequest, _ctx: InvocationContext):
     if (!minutes) throw Errors.notFound("Minutes");
     await requireCommitteeOfficer(user, minutes.meeting.committeeId);
 
-    const updated = await approveMinutes(minutesId, user.id);
-    return ok(updated);
+    await approveMinutes(minutesId, user.id);
+    const detail = await getMinutesDetail(minutesId);
+    return ok(detail);
   } catch (err) {
     return errorResponse(err);
   }
@@ -106,10 +138,10 @@ async function approveMinutesHandler(req: HttpRequest, _ctx: InvocationContext):
 
 async function handleMinutesForMeeting(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
-  
-  if (req.method === "GET") return listMinutesForMeeting(req, _ctx);
+
+  if (req.method === "GET") return listMinutesForMeetingHandler(req, _ctx);
   if (req.method === "POST") return createMinutesHandler(req, _ctx);
-  
+
   return errorResponse(new Error("Method not allowed"));
 }
 
@@ -118,6 +150,13 @@ app.http("minutesForMeeting", {
   authLevel: "anonymous",
   route: "meetings/{id}/minutes",
   handler: handleMinutesForMeeting,
+});
+
+app.http("getMinutes", {
+  methods: ["GET", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "minutes/{minutesId}",
+  handler: getMinutesHandler,
 });
 
 app.http("issueMinutes", {

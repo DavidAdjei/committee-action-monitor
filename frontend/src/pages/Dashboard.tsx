@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Filter,
   ListChecks,
+  Download,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -18,6 +19,7 @@ import { StatusPill, DueBadge, ProgressBar, formatDate } from "@/components/Stat
 import { LoadingLogo } from "@/components/LoadingLogo";
 import { ActionDetailPanel } from "@/components/ActionDetailPanel";
 import { useAuth } from "@/state/authContext";
+import { useFlash } from "@/state/toastContext";
 import type { DashboardSummary, UrgentDashboardAction } from "@/types";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -41,7 +43,7 @@ function StatCard({
   label,
   value,
   subtext,
-  tone = "text-ink",
+  tone = "text-ink dark:text-white",
   highlight,
 }: {
   icon: React.ReactNode;
@@ -73,6 +75,8 @@ function StatCard({
 
 export default function Dashboard() {
   const { me } = useAuth();
+  const flash = useFlash();
+  const [exporting, setExporting] = useState(false);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -159,6 +163,26 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className="btn gap-2 text-xs font-medium text-slate-600 dark:text-slate-300"
+            disabled={exporting}
+            title="Export action register as CSV"
+            onClick={async () => {
+              setExporting(true);
+              try {
+                await endpoints.actionsExport();
+                flash("Action register export downloaded");
+              } catch (err: any) {
+                flash(err?.message ?? "Export failed", "error");
+              } finally {
+                setExporting(false);
+              }
+            }}
+          >
+            <Download className="h-3.5 w-3.5" />
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
           <button
             onClick={handleRefresh}
             disabled={refreshing}

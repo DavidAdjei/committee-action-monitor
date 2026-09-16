@@ -16,19 +16,19 @@ export function Modal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 py-10 dark:bg-black/50"
+      className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-3 py-6 sm:p-4 sm:py-10 dark:bg-black/50"
       onMouseDown={onClose}
     >
       <div
-        className={`w-full ${wide ? "max-w-2xl" : "max-w-lg"} rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-800`}
+        className={`w-full ${wide ? "max-w-2xl" : "max-w-lg"} rounded-2xl bg-white p-4 shadow-2xl sm:p-6 dark:bg-slate-800`}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-bold text-ink dark:text-slate-100">{title}</h2>
+        <div className="mb-4 flex items-start justify-between gap-3 sm:mb-5 sm:gap-4">
+          <div className="min-w-0">
+            <h2 className="text-base font-bold text-ink dark:text-white sm:text-lg ">{title}</h2>
             {subtitle && <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
           </div>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+          <button type="button" onClick={onClose} className="shrink-0 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -39,5 +39,9 @@ export function Modal({
 }
 
 export function ModalActions({ children }: { children: ReactNode }) {
-  return <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-700">{children}</div>;
+  return (
+    <div className="mt-6 flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:justify-end dark:border-slate-700">
+      {children}
+    </div>
+  );
 }

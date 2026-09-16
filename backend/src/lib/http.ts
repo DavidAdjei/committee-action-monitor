@@ -62,4 +62,8 @@ export const Errors = {
   notFound: (resource = "Resource") => new ApiError(404, "NOT_FOUND", `${resource} was not found.`),
   badRequest: (msg: string) => new ApiError(400, "BAD_REQUEST", msg),
   conflict: (msg: string) => new ApiError(409, "CONFLICT", msg),
+  /** Optimistic concurrency failure — client should reload and retry. */
+  versionConflict: (
+    msg = "This record was updated by someone else. Reload it and try again.",
+  ) => new ApiError(409, "VERSION_CONFLICT", msg),
 };

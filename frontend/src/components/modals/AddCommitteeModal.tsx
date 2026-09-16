@@ -52,7 +52,7 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
       wide
     >
       <form onSubmit={submit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="field-label">
             Committee name
             <input required className="field-input" value={name} onChange={(e) => setName(e.target.value)} />
@@ -89,7 +89,7 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
           </select>
         </label>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <PersonSelect label="Chairperson" value={chairperson} onChange={setChairperson} />
           <PersonSelect label="Secretary" value={secretary} onChange={setSecretary} />
           <PersonSelect label="Central Committee representative" value={centralRep} onChange={setCentralRep} centralOnly />

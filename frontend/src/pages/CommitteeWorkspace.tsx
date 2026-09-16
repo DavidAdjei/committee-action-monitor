@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { CalendarPlus, Crown, Eye, FileText, ListPlus, ShieldCheck, UserPlus, Video } from "lucide-react";
 import { endpoints } from "@/api/endpoints";
 import { StatusPill, DueBadge, ProgressBar, formatDate } from "@/components/StatusBits";
@@ -9,17 +9,31 @@ import { CreateMinutesModal } from "@/components/modals/CreateMinutesModal";
 import { AddMemberModal } from "@/components/modals/AddMemberModal";
 import { SetChairModal } from "@/components/modals/SetChairModal";
 import { ActionDetailPanel } from "@/components/ActionDetailPanel";
+import { MinutesDetailPanel } from "@/components/MinutesDetailPanel";
 import { LoadingLogo } from "@/components/LoadingLogo";
 import { useAuth } from "@/state/authContext";
-import type { ActionListItem, CommitteeDetail } from "@/types";
+import { useFlash } from "@/state/toastContext";
+import { ApiClientError } from "@/api/client";
+import {
+  canCreateAction,
+  canCreateMeeting,
+  canCreateMinutes,
+  canManageCommittee,
+  canManageMembers,
+} from "@/lib/permissions";
+import { MeetingDetailPanel } from "@/components/MeetingDetailPanel";
+import type { ActionListItem, CommitteeDetail, MeetingMinutes } from "@/types";
 
-const TABS = ["Overview", "Action Points", "Meetings"] as const;
+const TABS = ["Overview", "Action Points", "Meetings", "Minutes"] as const;
 type Tab = (typeof TABS)[number];
 
 export default function CommitteeWorkspace() {
   const { me } = useAuth();
+  const flash = useFlash();
+  const navigate = useNavigate();
   const { id } = useParams();
   const committeeId = Number(id);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [detail, setDetail] = useState<CommitteeDetail | null>(null);
   const [actions, setActions] = useState<ActionListItem[]>([]);
   const [tab, setTab] = useState<Tab>("Overview");
@@ -30,12 +44,52 @@ export default function CommitteeWorkspace() {
   const [showAddMember, setShowAddMember] = useState(false);
   const [showSetChair, setShowSetChair] = useState(false);
   const [openActionId, setOpenActionId] = useState<number | null>(null);
+  const [minutesList, setMinutesList] = useState<MeetingMinutes[]>([]);
+  const [minutesLoading, setMinutesLoading] = useState(false);
+  const [openMinutesId, setOpenMinutesId] = useState<number | null>(null);
+  const [openMeetingId, setOpenMeetingId] = useState<number | null>(null);
 
-  const loadDetail = () => endpoints.committee(committeeId).then(setDetail);
+  const handleAccessDenied = (err: unknown) => {
+    const message =
+      err instanceof ApiClientError
+        ? err.message
+        : (err as Error)?.message ?? "You do not have access to this committee.";
+    setLoadError(message);
+    flash(message, "error");
+    navigate("/committees", { replace: true });
+  };
+
+  const loadDetail = () =>
+    endpoints
+      .committee(committeeId)
+      .then((d) => {
+        setDetail(d);
+        setLoadError(null);
+      })
+      .catch(handleAccessDenied);
+
   const loadActions = () =>
     endpoints
       .actionsForCommittee(committeeId, statusFilter !== "All" ? { status: statusFilter } : undefined)
-      .then(setActions);
+      .then(setActions)
+      .catch((err) => {
+        // Don't loop loaders on secondary failures if detail already failed
+        if (!detail) handleAccessDenied(err);
+      });
+
+  const loadMinutes = async () => {
+    setMinutesLoading(true);
+    try {
+      const meetings = detail?.meetings ?? (await endpoints.committee(committeeId)).meetings;
+      const lists = await Promise.all(
+        (meetings ?? []).map((m) => endpoints.listMeetingMinutes(m.id).catch(() => [] as MeetingMinutes[])),
+      );
+      const flat = lists.flat().sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+      setMinutesList(flat);
+    } finally {
+      setMinutesLoading(false);
+    }
+  };
 
   useEffect(() => {
     loadDetail();
@@ -45,16 +99,41 @@ export default function CommitteeWorkspace() {
     loadActions();
   }, [committeeId, statusFilter]);
 
+  useEffect(() => {
+    if (tab === "Minutes") void loadMinutes();
+  }, [tab, committeeId, detail?.meetings?.length]);
+
   const refreshAll = () => {
     loadDetail();
     loadActions();
+    if (tab === "Minutes") void loadMinutes();
   };
+
+  if (loadError) {
+    return (
+      <div className="card border-red-200 bg-red-50 p-6 text-center dark:border-red-900 dark:bg-red-950">
+        <p className="text-sm text-red-700 dark:text-red-300">{loadError}</p>
+        <p className="mt-1 text-xs text-red-500">Redirecting to committees…</p>
+      </div>
+    );
+  }
 
   if (!detail) return <LoadingLogo scope="page" message="Loading committee workspace..." />;
 
-  // canEdit is strictly true only if the user is active Chairperson or Secretary of this committee
-  const canEdit = Boolean(detail.canEdit);
-  const canManage = Boolean(detail.canManageCommittee || me?.isCentralCommittee || me?.isAdmin);
+  // Server flags are authoritative when present. Client matrix is a fail-closed fallback
+  // and a second gate on write forms (docs §2 / §9 — UI is not the security control).
+  const canEdit =
+    detail.canEdit !== undefined && detail.canEdit !== null
+      ? Boolean(detail.canEdit)
+      : canCreateAction(me, committeeId) || canCreateMeeting(me, committeeId) || canCreateMinutes(me, committeeId);
+  const canManage =
+    detail.canManageCommittee !== undefined && detail.canManageCommittee !== null
+      ? Boolean(detail.canManageCommittee)
+      : canManageCommittee(me, committeeId);
+  const canMembers =
+    detail.canManageMembers !== undefined && detail.canManageMembers !== null
+      ? Boolean(detail.canManageMembers)
+      : canManageMembers(me, committeeId);
 
   return (
     <div className="space-y-5">
@@ -83,8 +162,8 @@ export default function CommitteeWorkspace() {
 
         {/* Action / Governance Buttons */}
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {/* Central Committee Governance Controls */}
-          {canManage && (
+          {/* Chair / Secretary (or admin): membership & leadership */}
+          {canMembers && (
             <>
               <button
                 className="btn gap-1.5 text-xs"
@@ -127,7 +206,7 @@ export default function CommitteeWorkspace() {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <SummaryTile label="Total" value={detail.summary.totalActions} />
         <SummaryTile label="Active" value={detail.summary.activeActions} tone="text-blue-600" />
         <SummaryTile label="Overdue" value={detail.summary.overdueActions} tone="text-red-600" />
@@ -140,7 +219,7 @@ export default function CommitteeWorkspace() {
             key={t}
             onClick={() => setTab(t)}
             className={`px-4 py-2.5 text-sm font-medium ${
-              tab === t ? "border-b-2 border-brand-600 text-brand-700" : "text-slate-500 hover:text-slate-700"
+              tab === t ? "border-b-2 border-brand-600 text-brand-700 dark:text-brand-300" : "text-slate-500 hover:text-slate-700 dark:text-slate-200"
             }`}
           >
             {t}
@@ -149,9 +228,9 @@ export default function CommitteeWorkspace() {
       </div>
 
       {tab === "Overview" && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="card">
-            <b className="mb-3 block text-sm text-slate-800">Pending verification</b>
+            <b className="mb-3 block text-sm text-slate-800 dark:text-slate-100">Pending verification</b>
             {detail.pendingVerification.length === 0 && (
               <p className="text-sm text-slate-400">Nothing awaiting verification.</p>
             )}
@@ -175,7 +254,7 @@ export default function CommitteeWorkspace() {
           <div className="card">
             <div className="mb-3 flex items-center justify-between">
               <b className="text-sm font-bold text-slate-800 dark:text-slate-100">Committee Members</b>
-              {canManage && (
+              {canMembers && (
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setShowSetChair(true)}
@@ -248,7 +327,7 @@ export default function CommitteeWorkspace() {
                   onClick={() => setOpenActionId(a.id)}
                   className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50"
                 >
-                  <td className="py-2.5 font-medium text-slate-700">{a.referenceNo}</td>
+                  <td className="py-2.5 font-medium text-slate-700 dark:text-slate-200">{a.referenceNo}</td>
                   <td className="py-2.5">{a.title}</td>
                   <td className="py-2.5">{a.owner.fullName}</td>
                   <td className="py-2.5">
@@ -279,21 +358,81 @@ export default function CommitteeWorkspace() {
       {tab === "Meetings" && (
         <div className="space-y-3">
           {detail.meetings.map((m) => (
-            <div key={m.id} className="card flex items-center justify-between">
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setOpenMeetingId(m.id)}
+              className="card flex w-full flex-col gap-2 text-left transition hover:border-brand-300 hover:shadow-md sm:flex-row sm:items-center sm:justify-between"
+            >
               <div>
-                <b className="text-sm text-slate-800">{m.title}</b>
+                <b className="text-sm text-slate-800 dark:text-slate-100">{m.title}</b>
                 <p className="text-xs text-slate-500">
-                  {m.reference} · {formatDate(m.startsAt)} · {m.venue}
+                  {m.reference} · {formatDate(m.startsAt)} · {m.venue || "No venue"}
                 </p>
               </div>
-              {m.teamsJoinUrl && (
-                <a href={m.teamsJoinUrl} target="_blank" rel="noreferrer" className="btn">
-                  <Video className="h-4 w-4" /> Join Teams
-                </a>
-              )}
-            </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {m.teamsJoinUrl && (
+                  <span
+                    role="link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.open(m.teamsJoinUrl!, "_blank", "noopener,noreferrer");
+                    }}
+                    className="btn text-xs"
+                  >
+                    <Video className="h-4 w-4" /> Join Teams
+                  </span>
+                )}
+                <span className="text-xs font-medium text-brand-600">View details →</span>
+              </div>
+            </button>
           ))}
           {detail.meetings.length === 0 && <p className="card text-sm text-slate-400">No meetings recorded yet.</p>}
+        </div>
+      )}
+
+      {tab === "Minutes" && (
+        <div className="space-y-3">
+          {minutesLoading && <p className="text-sm text-slate-400">Loading minutes…</p>}
+          {!minutesLoading &&
+            minutesList.map((min) => (
+              <button
+                key={min.id}
+                type="button"
+                onClick={() => setOpenMinutesId(min.id)}
+                className="card flex w-full flex-col gap-2 text-left transition hover:border-brand-300 hover:shadow-md sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <b className="text-sm text-slate-800 dark:text-slate-100">
+                      {min.meeting.reference} · {min.meeting.title}
+                    </b>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        min.status === "APPROVED"
+                          ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                          : min.status === "ISSUED"
+                            ? "bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      }`}
+                    >
+                      {min.status}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {min.snapshots.length} action snapshot{min.snapshots.length === 1 ? "" : "s"} · Created{" "}
+                    {formatDate(min.createdAt)} by {min.createdBy.fullName}
+                    {min.issuedAt ? ` · Issued ${formatDate(min.issuedAt)}` : ""}
+                  </p>
+                </div>
+                <span className="shrink-0 text-xs font-medium text-brand-600">View details →</span>
+              </button>
+            ))}
+          {!minutesLoading && minutesList.length === 0 && (
+            <p className="card text-sm text-slate-400">
+              No minutes yet. Use <b>Create minutes</b> to capture discussion and freeze action statuses.
+            </p>
+          )}
         </div>
       )}
 
@@ -324,11 +463,35 @@ export default function CommitteeWorkspace() {
       {openActionId && (
         <ActionDetailPanel actionId={openActionId} onClose={() => setOpenActionId(null)} onChanged={refreshAll} />
       )}
+      {openMinutesId && (
+        <MinutesDetailPanel
+          minutesId={openMinutesId}
+          onClose={() => setOpenMinutesId(null)}
+          onChanged={() => {
+            void loadMinutes();
+            refreshAll();
+          }}
+        />
+      )}
+      {openMeetingId && (
+        <MeetingDetailPanel
+          meetingId={openMeetingId}
+          onClose={() => setOpenMeetingId(null)}
+          onOpenAction={(id) => {
+            setOpenMeetingId(null);
+            setOpenActionId(id);
+          }}
+          onOpenMinutes={(id) => {
+            setOpenMeetingId(null);
+            setOpenMinutesId(id);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function SummaryTile({ label, value, tone = "text-ink" }: { label: string; value: string | number; tone?: string }) {
+function SummaryTile({ label, value, tone = "text-ink dark:text-white" }: { label: string; value: string | number; tone?: string }) {
   return (
     <div className="card">
       <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>

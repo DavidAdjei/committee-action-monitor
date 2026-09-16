@@ -8,6 +8,9 @@ import { ok, errorResponse, preflight, Errors } from "../lib/http";
  * DEV_AUTH_ENABLED is unset — production deployments authenticate through
  * Azure App Service Easy Auth (Entra ID) in front of the Function App, and
  * this route is disabled entirely (401) in that configuration.
+ *
+ * Includes active committee memberships so the sign-in picker can show each
+ * user's roles in their respective committees.
  */
 async function devUsers(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
@@ -17,10 +20,39 @@ async function devUsers(req: HttpRequest, _ctx: InvocationContext): Promise<Http
     }
     const users = await prisma.user.findMany({
       where: { active: true },
-      select: { id: true, fullName: true, email: true, department: true, isCentralCommittee: true, isAdmin: true },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        department: true,
+        isCentralCommittee: true,
+        isAdmin: true,
+        memberships: {
+          where: { active: true },
+          select: {
+            committeeId: true,
+            role: true,
+            committee: { select: { id: true, name: true, code: true } },
+          },
+        },
+      },
       orderBy: { fullName: "asc" },
     });
-    return ok(users);
+    return ok(
+      users.map((u) => ({
+        id: u.id,
+        fullName: u.fullName,
+        email: u.email,
+        department: u.department,
+        isCentralCommittee: u.isCentralCommittee,
+        isAdmin: u.isAdmin,
+        memberships: u.memberships.map((m) => ({
+          committeeId: m.committeeId,
+          role: m.role,
+          committee: m.committee,
+        })),
+      })),
+    );
   } catch (err) {
     return errorResponse(err);
   }

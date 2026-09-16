@@ -13,3 +13,4 @@ import "./functions/notifications";
 import "./functions/reports";
 import "./functions/directory";
 import "./functions/dailyReminderTimer";
+import "./functions/audit";

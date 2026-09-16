@@ -27,11 +27,17 @@ export function AddMemberModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    endpoints.directory(query).then((users) => {
-      // Exclude already active members
-      setCandidates(users.filter((u) => !existingMemberIds.includes(u.id)));
-    });
-  }, [query, existingMemberIds]);
+    const handle = window.setTimeout(() => {
+      endpoints.directory(query).then((users) => {
+        // Exclude already active members
+        setCandidates(users.filter((u) => !existingMemberIds.includes(u.id)));
+      });
+    }, 200);
+    return () => window.clearTimeout(handle);
+    // existingMemberIds is intentionally not a dep trigger for refetch on every parent render;
+    // filter still uses the latest value when results arrive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -60,7 +66,7 @@ export function AddMemberModal({
   return (
     <Modal
       title="Add Committee Member"
-      subtitle={`${committeeName} · Central Committee Governance`}
+      subtitle={`${committeeName} · Chairperson / Secretary may add members and assign roles`}
       onClose={onClose}
     >
       <form onSubmit={submit} className="space-y-4">

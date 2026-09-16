@@ -77,6 +77,7 @@ export interface CommitteeDetail {
   canEdit?: boolean;
   isCentralCommitteeViewOnly?: boolean;
   canManageCommittee?: boolean;
+  canManageMembers?: boolean;
   members: { userId: number; fullName: string; role: CommitteeRole }[];
   meetings: Meeting[];
   pendingVerification: {
@@ -154,7 +155,10 @@ export interface NotificationItem {
   id: number;
   notificationType: string;
   deliveryStatus: string;
+  channel?: string;
+  errorMessage?: string | null;
   scheduledFor: string;
+  sentAt?: string | null;
   readAt: string | null;
   action: { id: number; referenceNo: string; title: string; committee: string } | null;
 }
@@ -182,4 +186,57 @@ export interface DashboardSummary {
   pendingVerificationCount?: number;
   committeeSummaries?: CommitteeSummary[];
   urgentActions?: UrgentDashboardAction[];
+}
+
+/** Append-only governance / security audit event (docs §9) */
+export interface AuditEvent {
+  eventId: string;
+  occurredAt: string;
+  actorUserId: number;
+  actorFullName?: string;
+  action: string;
+  resourceType: string;
+  resourceId: number | string;
+  committeeId?: number | null;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  result: "SUCCEEDED" | "DENIED" | string;
+  reason?: string | null;
+  correlationId?: string | null;
+}
+
+export type MinutesStatus = "DRAFT" | "ISSUED" | "APPROVED";
+export type MinutesSource = "LATEST_MEETING" | "PREVIOUS_MEETING" | "ALL_OPEN_ACTIONS";
+
+export interface MinuteActionSnapshot {
+  actionPointId: number;
+  referenceNo: string;
+  title: string;
+  owner: { id: number; fullName: string };
+  actionStatus: string;
+  progressPercent: number;
+  ownerRemarks: string | null;
+  capturedAt: string;
+  sourceMeetingId: number | null;
+}
+
+export interface MeetingMinutes {
+  id: number;
+  meetingId: number;
+  status: MinutesStatus;
+  sourcePopulation: MinutesSource | string;
+  discussion: string | null;
+  documentUrl: string | null;
+  createdBy: { id: number; fullName: string };
+  issuedAt: string | null;
+  approvedAt: string | null;
+  createdAt: string;
+  meeting: {
+    id: number;
+    title: string;
+    reference: string;
+    startsAt: string;
+    committeeId: number;
+  };
+  snapshots: MinuteActionSnapshot[];
 }

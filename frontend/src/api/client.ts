@@ -20,6 +20,15 @@ export class ApiClientError extends Error {
     message: string,
   ) {
     super(message);
+    this.name = "ApiClientError";
+  }
+
+  get isForbidden() {
+    return this.status === 403 || this.code === "FORBIDDEN" || this.code === "UNAUTHORIZED";
+  }
+
+  get isConflict() {
+    return this.status === 409 || this.code === "CONFLICT" || this.code === "VERSION_CONFLICT";
   }
 }
 
@@ -42,7 +51,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
     if (!res.ok) {
       const err = body?.error ?? { code: "UNKNOWN", message: res.statusText };
-      throw new ApiClientError(res.status, err.code, err.message);
+      const code = err.code ?? "UNKNOWN";
+      let message = err.message ?? res.statusText;
+
+      // Friendly defaults for authorization / concurrency failures
+      if (res.status === 403 && !err.message) {
+        message = "You are not authorized to perform this operation.";
+      }
+      if (res.status === 409 && !err.message) {
+        message =
+          "This record was changed by someone else. Refresh and try again with the latest version.";
+      }
+
+      throw new ApiClientError(res.status, code, message);
     }
     return body as T;
   } finally {
@@ -57,6 +78,8 @@ export const api = {
   postForm: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
   patch: <T>(path: string, data?: unknown) =>
     request<T>(path, { method: "PATCH", body: data !== undefined ? JSON.stringify(data) : undefined }),
+  delete: <T>(path: string, data?: unknown) =>
+    request<T>(path, { method: "DELETE", body: data !== undefined ? JSON.stringify(data) : undefined }),
   download: async (path: string, fallbackFilename = "download"): Promise<void> => {
     const devUserId = getDevUserId();
     const headers: Record<string, string> = {
@@ -68,13 +91,16 @@ export const api = {
       const res = await fetch(`${BASE_URL}${path}`, { method: "GET", headers });
       if (!res.ok) {
         let errMsg = res.statusText;
+        let code = "DOWNLOAD_FAILED";
         try {
           const body = await res.json();
           if (body?.error?.message) errMsg = body.error.message;
+          if (body?.error?.code) code = body.error.code;
         } catch {
           // ignore
         }
-        throw new ApiClientError(res.status, "DOWNLOAD_FAILED", errMsg);
+        if (res.status === 403) errMsg = errMsg || "You are not authorized to download this file.";
+        throw new ApiClientError(res.status, code, errMsg);
       }
 
       const blob = await res.blob();
