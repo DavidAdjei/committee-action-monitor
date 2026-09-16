@@ -218,9 +218,8 @@ export default function CommitteeWorkspace() {
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-2.5 text-sm font-medium ${
-              tab === t ? "border-b-2 border-brand-600 text-brand-700 dark:text-brand-300" : "text-slate-500 hover:text-slate-700 dark:text-slate-200"
-            }`}
+            className={`px-4 py-2.5 text-sm font-medium ${tab === t ? "border-b-2 border-brand-600 text-brand-700 dark:text-brand-300" : "text-slate-500 hover:text-slate-700 dark:text-slate-200"
+              }`}
           >
             {t}
           </button>
@@ -277,13 +276,12 @@ export default function CommitteeWorkspace() {
                 <div key={m.userId} className="flex items-center justify-between py-1.5 text-sm">
                   <span className="font-medium text-slate-800 dark:text-slate-200">{m.fullName}</span>
                   <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                      m.role === "CHAIRPERSON"
-                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                        : m.role === "SECRETARY"
-                          ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                    }`}
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${m.role === "CHAIRPERSON"
+                      ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                      : m.role === "SECRETARY"
+                        ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      }`}
                   >
                     {m.role === "CHAIRPERSON" ? "Chairperson" : m.role === "SECRETARY" ? "Secretary" : "Member"}
                   </span>
@@ -301,9 +299,8 @@ export default function CommitteeWorkspace() {
               <button
                 key={s}
                 onClick={() => setStatusFilter(s)}
-                className={`rounded-full px-3 py-1.5 text-xs font-medium ${
-                  statusFilter === s ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium ${statusFilter === s ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
               >
                 {s}
               </button>
@@ -408,13 +405,12 @@ export default function CommitteeWorkspace() {
                       {min.meeting.reference} · {min.meeting.title}
                     </b>
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        min.status === "APPROVED"
-                          ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                          : min.status === "ISSUED"
-                            ? "bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                      }`}
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${min.status === "APPROVED"
+                        ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                        : min.status === "ISSUED"
+                          ? "bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
                     >
                       {min.status}
                     </span>
@@ -487,6 +483,35 @@ export default function CommitteeWorkspace() {
           }}
         />
       )}
+
+      {
+        showAddMember && (
+          <AddMemberModal
+            committeeId={committeeId}
+            committeeName={detail.name}
+            existingMemberIds={detail.members.map((user) => user.userId)}
+            onClose={() => setShowAddMember(false)}
+            onAdded={() => {
+              refreshAll();
+            }}
+          />
+        )
+      }
+
+      {
+        showSetChair && (
+          <SetChairModal
+            committeeId={committeeId}
+            committeeName={detail.name}
+            currentChairperson={detail.chairperson}
+            onClose={() => setShowSetChair(false)}
+            onChanged={() => {
+              refreshAll();
+            }}
+          />
+        )
+      }
+
     </div>
   );
 }
