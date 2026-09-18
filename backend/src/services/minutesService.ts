@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { Errors } from "../lib/http";
 import { buildActionNotifications } from "./notificationService";
 import { auditRow } from "./auditService";
+import { buildMinutesIssuedMail, buildAttendanceCsvAttachment } from "./minutesMailService";
 import type { MinutesSource } from "@prisma/client";
 
 export interface CreateMinutesInput {
@@ -22,6 +23,13 @@ export interface CreateMinutesInput {
 export async function createDraftMinutes(input: CreateMinutesInput) {
   const meeting = await prisma.meeting.findUnique({ where: { id: input.meetingId } });
   if (!meeting) throw Errors.notFound("Meeting");
+
+  const existingMinutes = await prisma.meetingMinutes.findUnique({
+    where: { meetingId: input.meetingId },
+  });
+  if (existingMinutes) {
+    throw Errors.conflict("This meeting already has minutes. Only one minutes pack is allowed per meeting.");
+  }
 
   const actions = await prisma.actionPoint.findMany({
     where: { id: { in: input.includedActionPointIds }, committeeId: meeting.committeeId },
@@ -95,19 +103,34 @@ export async function issueMinutes(minutesId: number, issuedById: number, docume
     const recipientIds = new Set<number>([
       committee.chairpersonId,
       committee.secretaryId,
-      committee.centralRepId,
+      ...(committee.centralRepId ? [committee.centralRepId] : []),
     ]);
     for (const s of minutes.snapshots) recipientIds.add(s.actionPoint.ownerId);
 
-    for (const actionPointId of minutes.snapshots.map((s) => s.actionPointId)) {
-      await tx.notification.createMany({
-        data: buildActionNotifications({
-          actionPointId,
-          recipientIds: Array.from(recipientIds),
-          notificationType: "MINUTES_ISSUED",
-        }),
-        skipDuplicates: true,
-      });
+    // One email per recipient. Idempotency encodes minutesId so the delivery
+    // worker can attach the attendance CSV for this minutes pack.
+    const firstActionId = minutes.snapshots[0]?.actionPointId ?? null;
+    await tx.notification.createMany({
+      data: Array.from(recipientIds).map((recipientId) => ({
+        actionPointId: firstActionId,
+        recipientId,
+        channel: "EMAIL" as const,
+        notificationType: "MINUTES_ISSUED" as const,
+        idempotencyKey: `minutes:${minutesId}:recipient:${recipientId}:MINUTES_ISSUED`,
+        scheduledFor: new Date(),
+      })),
+      skipDuplicates: true,
+    });
+
+    // Attendance CSV is prepared for the outbound email as a file attachment.
+    // The delivery worker loads buildMinutesIssuedMail(minutesId) and attaches
+    // the CSV via Graph sendMail (see minutesMailService.toGraphFileAttachment).
+    let attendanceAttachmentName: string | undefined;
+    try {
+      const att = await buildAttendanceCsvAttachment(minutes.meetingId);
+      attendanceAttachmentName = att.filename;
+    } catch {
+      attendanceAttachmentName = undefined;
     }
 
     await tx.auditEvent.create({
@@ -117,12 +140,22 @@ export async function issueMinutes(minutesId: number, issuedById: number, docume
         resourceType: "meeting_minutes",
         resourceId: minutesId,
         committeeId: committee.id,
+        after: {
+          emailAttachment: attendanceAttachmentName
+            ? { filename: attendanceAttachmentName, contentType: "text/csv", role: "attendance_register" }
+            : null,
+        },
         result: "SUCCESS",
       }),
     });
 
     return updated;
   });
+}
+
+/** Public helper used by the issue API response and mail workers. */
+export async function getMinutesIssuedMailPayload(minutesId: number) {
+  return buildMinutesIssuedMail(minutesId);
 }
 
 export async function approveMinutes(minutesId: number, approvedById: number) {

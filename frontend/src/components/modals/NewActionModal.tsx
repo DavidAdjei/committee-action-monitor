@@ -28,7 +28,6 @@ export function NewActionModal({
   const [description, setDescription] = useState("");
   const [owner, setOwner] = useState<DirectoryUser | null>(null);
   const [ownerCandidates, setOwnerCandidates] = useState<DirectoryUser[]>([]);
-  const [dateRaised, setDateRaised] = useState(() => new Date().toISOString().slice(0, 10));
   const [deadline, setDeadline] = useState("");
   const [minutesReference, setMinutesReference] = useState("");
   const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "CRITICAL">("MEDIUM");
@@ -79,7 +78,6 @@ export function NewActionModal({
         title,
         description: description || undefined,
         ownerId: owner.id,
-        dateRaised,
         deadline,
         priority,
         minutesReference: minutesReference || undefined,
@@ -163,16 +161,6 @@ export function NewActionModal({
         </label>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <label className="field-label">
-            Date raised
-            <input
-              type="date"
-              required
-              className="field-input"
-              value={dateRaised}
-              onChange={(e) => setDateRaised(e.target.value)}
-            />
-          </label>
           <label className="field-label">
             Deadline
             <input

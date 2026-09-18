@@ -39,6 +39,9 @@ export function CreateMinutesModal({
   const [documentUrl, setDocumentUrl] = useState("");
   const [submitting, setSubmitting] = useState<"draft" | "issue" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [attendance, setAttendance] = useState<{ fullName: string; method: string }[]>([]);
+  const [meetingMeta, setMeetingMeta] = useState<{ title: string; reference: string; startsAt: string } | null>(null);
 
   useEffect(() => {
     endpoints.meetings(committeeId).then((m) => {
@@ -46,6 +49,26 @@ export function CreateMinutesModal({
       if (m.length) setMeetingId(m[0].id);
     });
   }, [committeeId]);
+
+  useEffect(() => {
+    if (!meetingId) {
+      setAttendance([]);
+      setMeetingMeta(null);
+      return;
+    }
+    endpoints
+      .meetingDetail(Number(meetingId))
+      .then((d: any) => {
+        setMeetingMeta({ title: d.title, reference: d.reference, startsAt: d.startsAt });
+        setAttendance(
+          (d.attendance ?? []).map((a: any) => ({ fullName: a.fullName, method: a.method })),
+        );
+      })
+      .catch(() => {
+        setAttendance([]);
+        setMeetingMeta(null);
+      });
+  }, [meetingId]);
 
   useEffect(() => {
     endpoints.actionsForCommittee(committeeId).then((list) => {
@@ -176,7 +199,7 @@ export function CreateMinutesModal({
           </div>
           <div className="max-h-52 space-y-1.5 overflow-y-auto">
             {actions.map((a) => (
-              <label key={a.id} className="flex items-center gap-2.5 rounded-md p-1.5 hover:bg-slate-50 dark:hover:bg-slate-800">
+              <label key={a.id} className="flex items-center gap-2.5 rounded-md p-1.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:hover:bg-slate-800">
                 <input type="checkbox" checked={selectedIds.has(a.id)} onChange={() => toggle(a.id)} />
                 <span className="flex-1 text-sm">
                   <b>
@@ -240,6 +263,67 @@ export function CreateMinutesModal({
         </label>
 
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+
+        <button
+          type="button"
+          className="text-xs font-semibold text-brand-700 dark:text-brand-300 hover:underline"
+          onClick={() => setShowPreview((v) => !v)}
+        >
+          {showPreview ? "Hide" : "Show"} minutes email preview
+        </button>
+
+        {showPreview && (
+          <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm shadow-inner dark:border-slate-600 dark:bg-slate-900">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Email / issued minutes layout
+            </p>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              {meetingMeta?.title ?? "Meeting minutes"}
+            </h3>
+            <p className="text-xs text-slate-500">
+              {meetingMeta?.reference ?? "—"} ·{" "}
+              {meetingMeta ? new Date(meetingMeta.startsAt).toLocaleString() : "—"} · {committeeName}
+            </p>
+            <hr className="my-3 border-slate-200 dark:border-slate-700" />
+            <h4 className="font-semibold text-slate-800 dark:text-slate-100">1. Attendance</h4>
+            <p className="mb-1 text-[11px] text-brand-700 dark:text-brand-300">
+              When minutes are issued by email, the full attendance register is attached as a CSV file.
+            </p>
+            {attendance.length === 0 ? (
+              <p className="text-xs text-slate-400">No attendance recorded for this meeting yet.</p>
+            ) : (
+              <ul className="mb-3 list-inside list-disc text-xs text-slate-600 dark:text-slate-300">
+                {attendance.map((a, i) => (
+                  <li key={i}>
+                    {a.fullName} <span className="text-slate-400">({a.method})</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <h4 className="font-semibold text-slate-800 dark:text-slate-100">2. Discussion</h4>
+            <p className="mb-2 whitespace-pre-wrap text-xs text-slate-600 dark:text-slate-300">
+              {discussion || "—"}
+            </p>
+            <h4 className="font-semibold text-slate-800 dark:text-slate-100">3. Decisions</h4>
+            <p className="mb-2 whitespace-pre-wrap text-xs text-slate-600 dark:text-slate-300">
+              {decisions || "—"}
+            </p>
+            <h4 className="font-semibold text-slate-800 dark:text-slate-100">4. Resolutions</h4>
+            <p className="mb-2 whitespace-pre-wrap text-xs text-slate-600 dark:text-slate-300">
+              {resolutions || "—"}
+            </p>
+            <h4 className="font-semibold text-slate-800 dark:text-slate-100">5. Action points</h4>
+            <ul className="list-inside list-disc text-xs text-slate-600 dark:text-slate-300">
+              {actions
+                .filter((a) => selectedIds.has(a.id))
+                .map((a) => (
+                  <li key={a.id}>
+                    {a.referenceNo} — {a.title} (Owner: {a.owner.fullName}, {a.progress}%, {a.status})
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
 
         <ModalActions>
           <button type="button" className="btn" onClick={onClose} disabled={!!submitting}>

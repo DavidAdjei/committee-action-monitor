@@ -123,18 +123,20 @@ function PersonSelect({
   value,
   onChange,
   centralOnly = false,
+  allowClear = false,
 }: {
   label: string;
   value: DirectoryUser | null;
   onChange: (u: DirectoryUser | null) => void;
   centralOnly?: boolean;
+  allowClear?: boolean;
 }) {
   const [options, setOptions] = useState<DirectoryUser[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   if (!loaded) {
     endpoints.directory("").then((all) => {
-      setOptions(all);
+      setOptions(centralOnly ? all.filter((u) => u.isCentralCommittee) : all);
       setLoaded(true);
     });
   }
@@ -143,19 +145,25 @@ function PersonSelect({
     <label className="field-label">
       {label}
       <select
-        required
+        required={!allowClear}
         className="field-input"
         value={value?.id ?? ""}
-        onChange={(e) => onChange(options.find((o) => o.id === Number(e.target.value)) ?? null)}
+        onChange={(e) =>
+          onChange(
+            e.target.value ? options.find((o) => o.id === Number(e.target.value)) ?? null : null,
+          )
+        }
       >
-        <option value="">Select…</option>
+        <option value="">{allowClear ? "None" : "Select…"}</option>
         {options.map((o) => (
           <option key={o.id} value={o.id}>
             {o.fullName}
           </option>
         ))}
       </select>
-      {centralOnly && <small className="font-normal text-slate-400">Must be a Central Committee Member.</small>}
+      {centralOnly && (
+        <small className="font-normal text-slate-400">Must be a Central Committee Member.</small>
+      )}
     </label>
   );
 }

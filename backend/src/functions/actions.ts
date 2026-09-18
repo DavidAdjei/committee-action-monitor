@@ -31,7 +31,7 @@ async function listActions(req: HttpRequest, _ctx: InvocationContext): Promise<H
           : {}),
       },
       include: { owner: true, meeting: true },
-      orderBy: { deadline: "asc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
 
     return ok(actions.map(serializeAction));
@@ -63,6 +63,7 @@ function serializeAction(a: any) {
     meeting: { id: a.meeting.id, title: a.meeting.title, reference: a.meeting.reference },
     owner: { id: a.owner.id, fullName: a.owner.fullName },
     dateRaised: a.dateRaised,
+    createdAt: a.createdAt,
     deadline: a.deadline,
     revisedDeadline: a.revisedDeadline,
     priority: a.priority,
@@ -98,9 +99,9 @@ async function createActionHandler(req: HttpRequest, _ctx: InvocationContext): P
       additionalStakeholderIds?: number[];
     };
 
-    if (!body.meetingId || !body.title || !body.ownerId || !body.dateRaised || !body.deadline) {
+    if (!body.meetingId || !body.title || !body.ownerId || !body.deadline) {
       throw Errors.badRequest(
-        "meetingId, title, ownerId, dateRaised and deadline are required.",
+        "meetingId, title, ownerId and deadline are required.",
       );
     }
 
@@ -110,7 +111,8 @@ async function createActionHandler(req: HttpRequest, _ctx: InvocationContext): P
       title: body.title,
       description: body.description,
       ownerId: body.ownerId,
-      dateRaised: new Date(body.dateRaised),
+      // Start date is always the creation moment — not client-supplied.
+      dateRaised: new Date(),
       deadline: new Date(body.deadline),
       priority: body.priority,
       minutesReference: body.minutesReference,

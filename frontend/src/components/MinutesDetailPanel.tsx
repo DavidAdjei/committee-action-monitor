@@ -36,11 +36,23 @@ export function MinutesDetailPanel({
   const [detail, setDetail] = useState<MeetingMinutes | null>(null);
   const [busy, setBusy] = useState(false);
   const [documentUrl, setDocumentUrl] = useState("");
+  const [attendanceList, setAttendanceList] = useState<{ fullName: string; method: string }[]>([]);
+  const [showMailPreview, setShowMailPreview] = useState(false);
+  const [showAttendance, setShowAttendance] = useState(false);
 
-  const load = () => endpoints.getMinutes(minutesId).then((d) => {
-    setDetail(d);
-    setDocumentUrl(d.documentUrl ?? "");
-  });
+  const load = () =>
+    endpoints.getMinutes(minutesId).then(async (d) => {
+      setDetail(d);
+      setDocumentUrl(d.documentUrl ?? "");
+      try {
+        const m: any = await endpoints.meetingDetail(d.meetingId);
+        setAttendanceList(
+          (m.attendance ?? []).map((a: any) => ({ fullName: a.fullName, method: a.method })),
+        );
+      } catch {
+        setAttendanceList([]);
+      }
+    });
 
   useEffect(() => {
     load().catch((err: unknown) => {
@@ -68,7 +80,7 @@ export function MinutesDetailPanel({
         documentUrl: documentUrl.trim() || undefined,
       });
       setDetail(updated);
-      flash("Minutes issued — stakeholders notified");
+      flash("Minutes issued — stakeholders notified (attendance CSV attached to email)");
       onChanged();
     } catch (err: unknown) {
       flash(err instanceof ApiClientError ? err.message : "Could not issue minutes.", "error");
@@ -123,6 +135,33 @@ export function MinutesDetailPanel({
           </div>
         </div>
 
+        <div>
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <b className="text-sm text-slate-800 dark:text-slate-100">Attendance</b>
+            <button
+              type="button"
+              className="btn text-xs py-1"
+              onClick={() => setShowAttendance((v) => !v)}
+            >
+              {showAttendance ? "Hide attendance" : "View attendance"}
+              <span className="text-slate-400">({attendanceList.length})</span>
+            </button>
+          </div>
+          {showAttendance && (
+            attendanceList.length === 0 ? (
+              <p className="text-sm text-slate-400">No attendance recorded for this meeting.</p>
+            ) : (
+              <ul className="mb-1 list-inside list-disc text-sm text-slate-600 dark:text-slate-300">
+                {attendanceList.map((a, i) => (
+                  <li key={i}>
+                    {a.fullName} <span className="text-xs text-slate-400">({a.method})</span>
+                  </li>
+                ))}
+              </ul>
+            )
+          )}
+        </div>
+
         {detail.discussion && (
           <div>
             <b className="mb-1.5 block text-sm text-slate-800 dark:text-slate-100">
@@ -136,7 +175,7 @@ export function MinutesDetailPanel({
 
         <div>
           <b className="mb-1.5 block text-sm text-slate-800 dark:text-slate-100">
-            Immutable action snapshots ({detail.snapshots.length})
+            Action points ({detail.snapshots.length})
           </b>
           <p className="mb-2 text-xs text-slate-400">
             Captured when the minutes were created. Later changes to live actions do not alter these rows.
@@ -211,6 +250,42 @@ export function MinutesDetailPanel({
           )}
         </div>
       </div>
+
+      <button
+        type="button"
+        className="mt-4 text-xs font-semibold text-brand-700 dark:text-brand-300 hover:underline"
+        onClick={() => setShowMailPreview((v) => !v)}
+      >
+        {showMailPreview ? "Hide" : "Show"} email layout preview
+      </button>
+      {showMailPreview && (
+        <div className="mt-2 rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm dark:border-slate-600 dark:bg-slate-900">
+          <h3 className="font-bold">{detail.meeting.title}</h3>
+          <p className="text-xs text-slate-500">
+            {detail.meeting.reference} · {formatDate(detail.meeting.startsAt)}
+          </p>
+          <hr className="my-2 border-slate-200 dark:border-slate-700" />
+          <p className="font-semibold">1. Attendance</p>
+          <p className="mb-1 text-[11px] text-brand-700 dark:text-brand-300">
+            Email delivery attaches the attendance register as a CSV file.
+          </p>
+          <ul className="mb-2 list-inside list-disc text-xs">
+            {attendanceList.map((a, i) => (
+              <li key={i}>{a.fullName}</li>
+            ))}
+          </ul>
+          <p className="font-semibold">2. Discussion, decisions & resolutions</p>
+          <p className="mb-2 whitespace-pre-wrap text-xs">{detail.discussion}</p>
+          <p className="font-semibold">3. Action points</p>
+          <ul className="list-inside list-disc text-xs">
+            {detail.snapshots.map((s) => (
+              <li key={s.actionPointId}>
+                {s.referenceNo} — {s.title} ({s.actionStatus}, {s.progressPercent}%)
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <ModalActions>
         <button type="button" className="btn" onClick={onClose}>

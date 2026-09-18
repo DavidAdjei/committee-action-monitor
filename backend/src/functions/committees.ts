@@ -24,23 +24,39 @@ async function listCommittees(req: HttpRequest, _ctx: InvocationContext): Promis
 
     const summaries = await committeeSummary(committees.map((c) => c.id));
 
-    const body = committees.map((c) => {
-      const summary = summaries.find((s) => s.committeeId === c.id)!;
-      const myRole = memberships.find((m) => m.committeeId === c.id)?.role ?? null;
-      return {
-        id: c.id,
-        name: c.name,
-        code: c.code,
-        mandate: c.mandate,
-        meetingFrequency: c.meetingFrequency,
-        chairperson: { id: c.chairperson.id, fullName: c.chairperson.fullName },
-        secretary: { id: c.secretary.id, fullName: c.secretary.fullName },
-        centralRep: { id: c.centralRep.id, fullName: c.centralRep.fullName },
-        myRole,
-        canEdit: myRole === "CHAIRPERSON" || myRole === "SECRETARY",
-        ...summary,
-      };
-    });
+    const roleRank = (role: string | null | undefined): number => {
+      if (role === "CHAIRPERSON") return 0;
+      if (role === "SECRETARY") return 1;
+      if (role === "MEMBER") return 2;
+      return 3; // no membership (e.g. Central overview)
+    };
+
+    const body = committees
+      .map((c) => {
+        const summary = summaries.find((s) => s.committeeId === c.id)!;
+        const myRole = memberships.find((m) => m.committeeId === c.id)?.role ?? null;
+        return {
+          id: c.id,
+          name: c.name,
+          code: c.code,
+          mandate: c.mandate,
+          meetingFrequency: c.meetingFrequency,
+          chairperson: { id: c.chairperson.id, fullName: c.chairperson.fullName },
+          secretary: { id: c.secretary.id, fullName: c.secretary.fullName },
+          centralRep: c.centralRep
+            ? { id: c.centralRep.id, fullName: c.centralRep.fullName }
+            : null,
+          myRole,
+          canEdit: myRole === "CHAIRPERSON" || myRole === "SECRETARY",
+          ...summary,
+        };
+      })
+      // Prioritise by the caller's role in each committee: Chair → Secretary → Member → other
+      .sort((a, b) => {
+        const byRole = roleRank(a.myRole) - roleRank(b.myRole);
+        if (byRole !== 0) return byRole;
+        return a.name.localeCompare(b.name);
+      });
 
     return ok(body);
   } catch (err) {
@@ -69,10 +85,20 @@ async function createCommitteeHandler(req: HttpRequest, _ctx: InvocationContext)
       memberIds?: number[];
     };
 
-    if (!body.name || !body.code || !body.chairpersonId || !body.secretaryId || !body.centralRepId) {
+    if (!body.name || !body.code || !body.chairpersonId || !body.secretaryId) {
       throw Errors.badRequest(
-        "name, code, chairpersonId, secretaryId and centralRepId are required.",
+        "name, code, chairpersonId and secretaryId are required.",
       );
+    }
+
+    // If a central rep is supplied, they must be a Central Committee member
+    if (body.centralRepId) {
+      const rep = await prisma.user.findUnique({ where: { id: Number(body.centralRepId) } });
+      if (!rep?.isCentralCommittee) {
+        throw Errors.badRequest(
+          "Central Committee representative must be a Central Committee member.",
+        );
+      }
     }
 
     const committee = await createCommittee({
@@ -82,7 +108,7 @@ async function createCommitteeHandler(req: HttpRequest, _ctx: InvocationContext)
       meetingFrequency: body.meetingFrequency,
       chairpersonId: body.chairpersonId,
       secretaryId: body.secretaryId,
-      centralRepId: body.centralRepId,
+      centralRepId: body.centralRepId ?? null,
       memberIds: body.memberIds ?? [],
       createdById: user.id,
     });

@@ -10,7 +10,8 @@ export interface CreateCommitteeInput {
   meetingFrequency?: string;
   chairpersonId: number;
   secretaryId: number;
-  centralRepId: number;
+  /** Optional — may be omitted when seeding or when not yet assigned */
+  centralRepId?: number | null;
   memberIds: number[]; // ordinary members, in addition to chair/secretary
   createdById: number;
 }
@@ -43,7 +44,7 @@ export async function createCommittee(input: CreateCommitteeInput) {
         meetingFrequency: input.meetingFrequency,
         chairpersonId: input.chairpersonId,
         secretaryId: input.secretaryId,
-        centralRepId: input.centralRepId,
+        centralRepId: input.centralRepId ?? null,
       },
     });
 
@@ -273,5 +274,104 @@ export async function setCommitteeChair(input: SetChairInput) {
     });
 
     return updatedCommittee;
+  });
+}
+
+export async function removeCommitteeMember(input: {
+  committeeId: number;
+  userId: number;
+  actorUserId: number;
+}) {
+  const committee = await prisma.committee.findUnique({ where: { id: input.committeeId } });
+  if (!committee) throw Errors.notFound("Committee");
+
+  const membership = await prisma.committeeMembership.findUnique({
+    where: {
+      uq_committee_user: { committeeId: input.committeeId, userId: input.userId },
+    },
+  });
+  if (!membership || !membership.active) throw Errors.notFound("Membership");
+
+  // Protect designated chair / secretary seats — reassign via Set Chair / role change first
+  if (committee.chairpersonId === input.userId) {
+    throw Errors.conflict(
+      "Cannot remove the current Chairperson. Assign a new chair first (Central Committee).",
+    );
+  }
+  if (committee.secretaryId === input.userId) {
+    throw Errors.conflict(
+      "Cannot remove the current Secretary. Assign another member as Secretary first.",
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.committeeMembership.update({
+      where: { id: membership.id },
+      data: { active: false },
+    });
+
+    await tx.auditEvent.create({
+      data: auditRow({
+        actorUserId: input.actorUserId,
+        action: "committee.member_remove",
+        resourceType: "committee_membership",
+        resourceId: membership.id,
+        committeeId: input.committeeId,
+        before: { userId: input.userId, role: membership.role },
+        result: "SUCCESS",
+      }),
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * Assign or clear the Central Committee representative for a sub-committee.
+ * The target user (when set) must have isCentralCommittee = true.
+ */
+export async function setCommitteeCentralRep(input: {
+  committeeId: number;
+  centralRepId: number | null;
+  actorUserId: number;
+}) {
+  const committee = await prisma.committee.findUnique({ where: { id: input.committeeId } });
+  if (!committee) throw Errors.notFound("Committee");
+
+  if (input.centralRepId != null) {
+    const user = await prisma.user.findUnique({ where: { id: input.centralRepId } });
+    if (!user) throw Errors.notFound("User");
+    if (!user.isCentralCommittee) {
+      throw Errors.badRequest(
+        "Central Committee representative must be a Central Committee member.",
+      );
+    }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.committee.update({
+      where: { id: input.committeeId },
+      data: { centralRepId: input.centralRepId },
+      include: {
+        chairperson: true,
+        secretary: true,
+        centralRep: true,
+      },
+    });
+
+    await tx.auditEvent.create({
+      data: auditRow({
+        actorUserId: input.actorUserId,
+        action: "committee.set_central_rep",
+        resourceType: "committee",
+        resourceId: input.committeeId,
+        committeeId: input.committeeId,
+        before: { centralRepId: committee.centralRepId },
+        after: { centralRepId: input.centralRepId },
+        result: "SUCCESS",
+      }),
+    });
+
+    return updated;
   });
 }

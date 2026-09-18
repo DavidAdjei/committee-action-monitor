@@ -82,8 +82,11 @@ export async function createActionPoint(input: CreateActionPointInput) {
     const mandatory: { userId: number; stakeholderType: StakeholderType }[] = [
       { userId: committee.chairpersonId, stakeholderType: "CHAIRPERSON" },
       { userId: committee.secretaryId, stakeholderType: "SECRETARY" },
+      ...(committee.centralRepId
+        ? [{ userId: committee.centralRepId, stakeholderType: "CENTRAL_COMMITTEE" as const }]
+        : []),
       { userId: input.ownerId, stakeholderType: "ACTION_OWNER" },
-      { userId: committee.centralRepId, stakeholderType: "CENTRAL_COMMITTEE" },
+      
     ];
     const additional = (input.additionalStakeholderIds ?? [])
       .filter((id) => !mandatory.some((m) => m.userId === id))

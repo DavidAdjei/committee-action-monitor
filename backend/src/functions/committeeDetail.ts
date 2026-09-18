@@ -2,9 +2,10 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/fu
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
 import { requireViewCommittee, requireCentralCommittee, requireCommitteeOfficer, isCommitteeOfficer } from "../lib/authorize";
-import { ok, errorResponse, preflight, Errors } from "../lib/http";
+import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
 import { committeeSummary } from "../services/reportService";
-import { addCommitteeMember, setCommitteeChair } from "../services/committeeService";
+import { recordDenied } from "../services/auditService";
+import { addCommitteeMember, setCommitteeChair, removeCommitteeMember, setCommitteeCentralRep } from "../services/committeeService";
 
 async function committeeDetail(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
@@ -54,7 +55,9 @@ async function committeeDetail(req: HttpRequest, _ctx: InvocationContext): Promi
       meetingFrequency: committee.meetingFrequency,
       chairperson: { id: committee.chairperson.id, fullName: committee.chairperson.fullName },
       secretary: { id: committee.secretary.id, fullName: committee.secretary.fullName },
-      centralRep: { id: committee.centralRep.id, fullName: committee.centralRep.fullName },
+      centralRep: committee.centralRep
+        ? { id: committee.centralRep.id, fullName: committee.centralRep.fullName }
+        : null,
       myRole,
       canEdit,
       isCentralCommitteeViewOnly,
@@ -63,6 +66,7 @@ async function committeeDetail(req: HttpRequest, _ctx: InvocationContext): Promi
       members: committee.memberships.map((m) => ({
         userId: m.userId,
         fullName: m.user.fullName,
+        email: m.user.email,
         role: m.role,
       })),
       meetings: committee.meetings,
@@ -99,6 +103,11 @@ async function addMemberHandler(req: HttpRequest, _ctx: InvocationContext): Prom
     };
     if (!body.userId) throw Errors.badRequest("userId is required.");
 
+    // Assigning Chairperson is reserved for Central Committee (Set Chair flow).
+    if (body.role === "CHAIRPERSON" && !user.isAdmin && !user.isCentralCommittee) {
+      throw Errors.forbidden("Only Central Committee members may assign the Chairperson role.");
+    }
+
     const membership = await addCommitteeMember({
       committeeId,
       userId: Number(body.userId),
@@ -119,9 +128,8 @@ async function setChairHandler(req: HttpRequest, _ctx: InvocationContext): Promi
     const committeeId = Number(req.params.id);
     if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
 
-    if (!user.isAdmin) {
-      await requireCommitteeOfficer(user, committeeId);
-    }
+    // Leadership reassignment is a Central Committee / Admin control only.
+    await requireCentralCommittee(user);
 
     const body = (await req.json()) as {
       chairpersonId?: number;
@@ -136,6 +144,103 @@ async function setChairHandler(req: HttpRequest, _ctx: InvocationContext): Promi
 
     return ok(updated);
   } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+
+async function removeMemberHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  let actorUserId: number | null = null;
+  let committeeId: number | undefined;
+  try {
+    const user = await requireUser(req);
+    actorUserId = user.id;
+    committeeId = Number(req.params.id);
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(committeeId) || !Number.isInteger(userId)) {
+      throw Errors.badRequest("Invalid committee or user id.");
+    }
+
+    if (!user.isAdmin) {
+      await requireCommitteeOfficer(user, committeeId);
+    }
+
+    const result = await removeCommitteeMember({
+      committeeId,
+      userId,
+      actorUserId: user.id,
+    });
+    return ok({ removed: true, membershipId: result.id });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 403) {
+      await recordDenied({
+        actorUserId: actorUserId,
+        action: "committee.member_remove",
+        resourceType: "committee",
+        resourceId: committeeId,
+        committeeId,
+        reason: err.message,
+      });
+    }
+    return errorResponse(err);
+  }
+}
+
+
+async function setCentralRepHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  let actorUserId: number | null = null;
+  let committeeId: number | undefined;
+  try {
+    const user = await requireUser(req);
+    actorUserId = user.id;
+    committeeId = Number(req.params.id);
+    if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
+
+    // Only Central Committee / Admin may assign the Central rep seat
+    await requireCentralCommittee(user);
+
+    const body = (await req.json()) as { centralRepId?: number | null };
+    // null or omit clears; number assigns (must be Central — enforced in service)
+    const centralRepId =
+      body.centralRepId === undefined || body.centralRepId === null
+        ? null
+        : Number(body.centralRepId);
+    if (centralRepId !== null && !Number.isInteger(centralRepId)) {
+      throw Errors.badRequest("Invalid centralRepId.");
+    }
+
+    const updated = await setCommitteeCentralRep({
+      committeeId,
+      centralRepId,
+      actorUserId: user.id,
+    });
+
+    let centralRep: { id: number; fullName: string } | null = null;
+    if (updated.centralRepId != null) {
+      const rep = await prisma.user.findUnique({
+        where: { id: updated.centralRepId },
+        select: { id: true, fullName: true },
+      });
+      if (rep) centralRep = { id: rep.id, fullName: rep.fullName };
+    }
+
+    return ok({
+      id: updated.id,
+      centralRep,
+    });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 403) {
+      await recordDenied({
+        actorUserId: actorUserId,
+        action: "committee.set_central_rep",
+        resourceType: "committee",
+        resourceId: committeeId,
+        committeeId,
+        reason: err.message,
+      });
+    }
     return errorResponse(err);
   }
 }
@@ -159,4 +264,18 @@ app.http("committeeSetChair", {
   authLevel: "anonymous",
   route: "committees/{id}/chair",
   handler: setChairHandler,
+});
+
+app.http("removeCommitteeMember", {
+  methods: ["DELETE", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "committees/{id}/members/{userId}",
+  handler: removeMemberHandler,
+});
+
+app.http("setCommitteeCentralRep", {
+  methods: ["PATCH", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "committees/{id}/central-rep",
+  handler: setCentralRepHandler,
 });

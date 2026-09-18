@@ -35,8 +35,16 @@ export function buildActionNotifications(params: {
  * into; it deliberately does not import any Graph SDK so the API stays
  * deployable without those credentials configured.
  */
+export type OutboundNotification = {
+  id: number;
+  recipientId: number;
+  notificationType: string;
+  /** Optional file attachments (e.g. attendance CSV on MINUTES_ISSUED). */
+  attachments?: { filename: string; contentType: string; content: string; encoding: "utf-8" | "base64" }[];
+};
+
 export async function dispatchPendingNotifications(
-  send: (n: { id: number; recipientId: number; notificationType: string }) => Promise<void>,
+  send: (n: OutboundNotification) => Promise<void>,
   prismaClient: Prisma.TransactionClient | typeof import("../lib/prisma").prisma,
 ): Promise<{ sent: number; failed: number }> {
   const pending = await prismaClient.notification.findMany({
@@ -48,7 +56,27 @@ export async function dispatchPendingNotifications(
   let failed = 0;
   for (const n of pending) {
     try {
-      await send({ id: n.id, recipientId: n.recipientId, notificationType: n.notificationType });
+      let attachments: OutboundNotification["attachments"];
+      // Minutes-issued emails attach the meeting attendance register as CSV.
+      if (n.notificationType === "MINUTES_ISSUED") {
+        try {
+          const match = /^minutes:(\d+):/.exec(n.idempotencyKey ?? "");
+          if (match) {
+            const minutesId = Number(match[1]);
+            const { buildMinutesIssuedMail } = await import("./minutesMailService");
+            const mail = await buildMinutesIssuedMail(minutesId);
+            attachments = mail.attachments;
+          }
+        } catch {
+          attachments = undefined;
+        }
+      }
+      await send({
+        id: n.id,
+        recipientId: n.recipientId,
+        notificationType: n.notificationType,
+        attachments,
+      });
       await prismaClient.notification.update({
         where: { id: n.id },
         data: { deliveryStatus: "SENT", sentAt: new Date() },

@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import { prisma } from "../lib/prisma";
 import { Errors } from "../lib/http";
 import { auditRow } from "./auditService";
@@ -81,6 +82,7 @@ export async function createMeeting(input: CreateMeetingInput) {
         venue: input.venue,
         agenda: input.agenda,
         teamsRequested: input.teamsRequested ?? false,
+        attendanceToken: randomBytes(24).toString("hex"),
         createdById: input.createdById,
       },
     });
@@ -106,5 +108,62 @@ export async function attachTeamsEvent(meetingId: number, teamsEventId: string, 
   return prisma.meeting.update({
     where: { id: meetingId },
     data: { teamsEventId, teamsJoinUrl },
+  });
+}
+
+export async function markAttendance(params: {
+  meetingId: number;
+  userId: number;
+  method: "QR" | "UPLOAD" | "MANUAL";
+  token?: string;
+  note?: string;
+}) {
+  const meeting = await prisma.meeting.findUnique({ where: { id: params.meetingId } });
+  if (!meeting) throw Errors.notFound("Meeting");
+
+  if (params.method === "QR") {
+    if (!params.token || params.token !== meeting.attendanceToken) {
+      throw Errors.forbidden("Invalid attendance token.");
+    }
+  }
+
+  return prisma.meetingAttendance.upsert({
+    where: {
+      uq_meeting_attendee: { meetingId: params.meetingId, userId: params.userId },
+    },
+    create: {
+      meetingId: params.meetingId,
+      userId: params.userId,
+      method: params.method,
+      note: params.note,
+    },
+    update: {
+      method: params.method,
+      markedAt: new Date(),
+      note: params.note,
+    },
+    include: { user: { select: { id: true, fullName: true, email: true } } },
+  });
+}
+
+export async function setAttendanceSheetUrl(params: {
+  meetingId: number;
+  url: string;
+  actorUserId: number;
+}) {
+  const meeting = await prisma.meeting.findUnique({ where: { id: params.meetingId } });
+  if (!meeting) throw Errors.notFound("Meeting");
+
+  return prisma.meeting.update({
+    where: { id: params.meetingId },
+    data: { attendanceSheetUrl: params.url },
+  });
+}
+
+export async function listAttendance(meetingId: number) {
+  return prisma.meetingAttendance.findMany({
+    where: { meetingId },
+    include: { user: { select: { id: true, fullName: true, email: true, department: true } } },
+    orderBy: { markedAt: "asc" },
   });
 }

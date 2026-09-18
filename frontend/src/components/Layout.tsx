@@ -165,7 +165,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
-              className="mr-1 rounded-lg p-2 text-slate-600 hover:bg-slate-100 md:hidden dark:text-slate-300 dark:hover:bg-slate-800"
+              className="mr-1 rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 md:hidden dark:text-slate-300"
               onClick={() => setMobileNavOpen(true)}
               aria-label="Open menu"
             >
@@ -179,7 +179,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="flex shrink-0 items-center gap-2 sm:gap-4">
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition text-slate-600 dark:text-slate-300"
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition text-slate-600 dark:text-slate-300"
               title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
             >
               {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
@@ -188,7 +188,6 @@ export function Layout({ children }: { children: ReactNode }) {
             <div className="flex items-center gap-2 sm:gap-3">
               <div className="hidden text-right sm:block">
                 <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{me.fullName}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">{me.department ?? "—"}</div>
               </div>
               <div className="grid h-9 w-9 place-items-center rounded-full bg-brand-100 dark:bg-brand-900 text-xs font-bold text-brand-700 dark:text-brand-200">
                 {initials(me.fullName)}

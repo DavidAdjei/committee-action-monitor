@@ -91,13 +91,13 @@ export function ActionDetailPanel({
     status: detail.status,
     isOfficerStakeholder,
   });
-
-  const canModify = canModifyAction(me, committeeId)
-  const canCancel = canCancelAction(me, committeeId, detail.status)
   const isOfficer =
     isOfficerStakeholder || isCommitteeOfficer(me, committeeId);
   const canReopen =
     isOfficer && ["COMPLETED", "CANCELLED"].includes(detail.status);
+  const canModify =
+    canModifyAction(me, committeeId) && !["COMPLETED", "CANCELLED"].includes(detail.status);
+  const canCancel = canCancelAction(me, committeeId, detail.status);
   const showAuditSection = canViewAudit(me, committeeId);
 
   const handleDownloadEvidence = async (evidenceId: number, filename: string) => {
@@ -478,7 +478,7 @@ export function ActionDetailPanel({
               <button
                 type="button"
                 onClick={loadAudit}
-                className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:text-brand-700"
+                className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:text-brand-700 dark:text-slate-200"
               >
                 <ScrollText className="h-4 w-4" />
                 {showAudit ? "Hide audit trail" : "Show audit trail"}
@@ -503,10 +503,11 @@ export function ActionDetailPanel({
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="font-semibold text-slate-800 dark:text-slate-100">{ev.action}</span>
                           <span
-                            className={`rounded-full px-2 py-0.5 font-medium ${ev.result === "SUCCEEDED"
+                            className={`rounded-full px-2 py-0.5 font-medium ${
+                              ev.result === "SUCCEEDED"
                                 ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
                                 : "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
-                              }`}
+                            }`}
                           >
                             {ev.result}
                           </span>

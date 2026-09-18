@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { CalendarPlus, Crown, Eye, FileText, ListPlus, ShieldCheck, UserPlus, Video } from "lucide-react";
+import { CalendarPlus, Crown, Eye, FileText, ListPlus, QrCode, ShieldCheck, Trash2, UserPlus, Video } from "lucide-react";
 import { endpoints } from "@/api/endpoints";
 import { StatusPill, DueBadge, ProgressBar, formatDate } from "@/components/StatusBits";
 import { NewActionModal } from "@/components/modals/NewActionModal";
@@ -8,6 +8,7 @@ import { CreateMeetingModal } from "@/components/modals/CreateMeetingModal";
 import { CreateMinutesModal } from "@/components/modals/CreateMinutesModal";
 import { AddMemberModal } from "@/components/modals/AddMemberModal";
 import { SetChairModal } from "@/components/modals/SetChairModal";
+import { SetCentralRepModal } from "@/components/modals/SetCentralRepModal";
 import { ActionDetailPanel } from "@/components/ActionDetailPanel";
 import { MinutesDetailPanel } from "@/components/MinutesDetailPanel";
 import { LoadingLogo } from "@/components/LoadingLogo";
@@ -22,7 +23,8 @@ import {
   canManageMembers,
 } from "@/lib/permissions";
 import { MeetingDetailPanel } from "@/components/MeetingDetailPanel";
-import type { ActionListItem, CommitteeDetail, MeetingMinutes } from "@/types";
+import { AttendanceQrProjector } from "@/components/AttendanceQrProjector";
+import type { ActionListItem, CommitteeDetail, Meeting, MeetingMinutes } from "@/types";
 
 const TABS = ["Overview", "Action Points", "Meetings", "Minutes"] as const;
 type Tab = (typeof TABS)[number];
@@ -43,11 +45,18 @@ export default function CommitteeWorkspace() {
   const [showNewMinutes, setShowNewMinutes] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
   const [showSetChair, setShowSetChair] = useState(false);
+  const [showSetCentralRep, setShowSetCentralRep] = useState(false);
   const [openActionId, setOpenActionId] = useState<number | null>(null);
   const [minutesList, setMinutesList] = useState<MeetingMinutes[]>([]);
   const [minutesLoading, setMinutesLoading] = useState(false);
   const [openMinutesId, setOpenMinutesId] = useState<number | null>(null);
   const [openMeetingId, setOpenMeetingId] = useState<number | null>(null);
+  const [projectMeeting, setProjectMeeting] = useState<{
+    title: string;
+    reference: string;
+    checkInUrl: string;
+  } | null>(null);
+  const [projectLoadingId, setProjectLoadingId] = useState<number | null>(null);
 
   const handleAccessDenied = (err: unknown) => {
     const message =
@@ -109,6 +118,30 @@ export default function CommitteeWorkspace() {
     if (tab === "Minutes") void loadMinutes();
   };
 
+
+  const openAttendanceProjector = async (meeting: Meeting) => {
+    setProjectLoadingId(meeting.id);
+    try {
+      const d: any = await endpoints.meetingDetail(meeting.id);
+      const token = d.attendanceToken as string | undefined;
+      if (!token) {
+        flash("Attendance QR is only available to the Chairperson or Secretary.", "error");
+        return;
+      }
+      const origin = window.location.origin;
+      const checkInUrl = `${origin}/meetings/${meeting.id}/check-in?token=${token}`;
+      setProjectMeeting({
+        title: d.title ?? meeting.title,
+        reference: d.reference ?? meeting.reference,
+        checkInUrl,
+      });
+    } catch (err: unknown) {
+      flash(err instanceof ApiClientError ? err.message : "Could not load attendance QR.", "error");
+    } finally {
+      setProjectLoadingId(null);
+    }
+  };
+
   if (loadError) {
     return (
       <div className="card border-red-200 bg-red-50 p-6 text-center dark:border-red-900 dark:bg-red-950">
@@ -154,32 +187,54 @@ export default function CommitteeWorkspace() {
           </div>
           <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-slate-400">{detail.mandate}</p>
           <p className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
-            Chairperson: <span className="font-semibold text-slate-700 dark:text-slate-300">{detail.chairperson.fullName}</span> · Secretary:{" "}
-            <span className="font-semibold text-slate-700 dark:text-slate-300">{detail.secretary.fullName}</span> · Central rep:{" "}
-            <span className="font-semibold text-slate-700 dark:text-slate-300">{detail.centralRep.fullName}</span>
+            Chairperson:{" "}
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              {detail.chairperson?.fullName ?? "None"}
+            </span>{" "}
+            · Secretary:{" "}
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              {detail.secretary?.fullName ?? "None"}
+            </span>{" "}
+            · Central rep:{" "}
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              {detail.centralRep?.fullName ?? "None"}
+            </span>
+            {canManage && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+                  onClick={() => setShowSetCentralRep(true)}
+                >
+                  Change
+                </button>
+              </>
+            )}
           </p>
         </div>
 
         {/* Action / Governance Buttons */}
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {/* Chair / Secretary (or admin): membership & leadership */}
+          {/* Central Committee / Admin: reassign chair */}
+          {canManage && (
+            <button
+              className="btn gap-1.5 text-xs"
+              onClick={() => setShowSetChair(true)}
+              title="Assign or reassign the committee chairperson"
+            >
+              <Crown className="h-4 w-4 text-brand-500" /> Set Chair
+            </button>
+          )}
+          {/* Chair / Secretary (or admin): add members and roles */}
           {canMembers && (
-            <>
-              <button
-                className="btn gap-1.5 text-xs"
-                onClick={() => setShowSetChair(true)}
-                title="Assign or reassign the committee chairperson"
-              >
-                <Crown className="h-4 w-4 text-brand-500" /> Set Chair
-              </button>
-              <button
-                className="btn gap-1.5 text-xs"
-                onClick={() => setShowAddMember(true)}
-                title="Add a new member to this committee"
-              >
-                <UserPlus className="h-4 w-4 text-slate-600 dark:text-slate-300" /> Add member
-              </button>
-            </>
+            <button
+              className="btn gap-1.5 text-xs"
+              onClick={() => setShowAddMember(true)}
+              title="Add a new member to this committee"
+            >
+              <UserPlus className="h-4 w-4 text-slate-600 dark:text-slate-300" /> Add member
+            </button>
           )}
 
           {/* Committee Officer Controls: Only visible to Chairperson & Secretary */}
@@ -218,8 +273,9 @@ export default function CommitteeWorkspace() {
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-2.5 text-sm font-medium ${tab === t ? "border-b-2 border-brand-600 text-brand-700 dark:text-brand-300" : "text-slate-500 hover:text-slate-700 dark:text-slate-200"
-              }`}
+            className={`px-4 py-2.5 text-sm font-medium ${
+              tab === t ? "border-b-2 border-brand-600 text-brand-700 dark:text-brand-300" : "text-slate-500 hover:text-slate-700 dark:text-slate-200"
+            }`}
           >
             {t}
           </button>
@@ -227,6 +283,82 @@ export default function CommitteeWorkspace() {
       </div>
 
       {tab === "Overview" && (
+        <div className="space-y-4">
+          {(() => {
+            const nowMs = Date.now();
+            const ongoing = detail.meetings.filter((m) => {
+              const start = new Date(m.startsAt).getTime();
+              const end = m.endsAt ? new Date(m.endsAt).getTime() : start + 3 * 60 * 60 * 1000;
+              return start <= nowMs && nowMs <= end;
+            });
+            if (ongoing.length === 0) return null;
+            return (
+              <div className="space-y-3">
+                {ongoing.map((m) => (
+                  <div
+                    key={m.id}
+                    className="card border-brand-300 bg-gradient-to-r from-brand-50 to-white dark:border-brand-800 dark:from-brand-950/40 dark:to-slate-800"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="mb-1 flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                            Live now
+                          </span>
+                          <span className="text-xs text-slate-500">{m.reference}</span>
+                        </div>
+                        <b className="text-base text-slate-900 dark:text-white">{m.title}</b>
+                        <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">
+                          {new Date(m.startsAt).toLocaleTimeString(undefined, {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                          {m.endsAt
+                            ? ` – ${new Date(m.endsAt).toLocaleTimeString(undefined, {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}`
+                            : ""}
+                          {m.venue ? ` · ${m.venue}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn text-xs"
+                          onClick={() => setOpenMeetingId(m.id)}
+                        >
+                          View meeting
+                        </button>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            className="btn-primary text-xs"
+                            disabled={projectLoadingId === m.id}
+                            onClick={() => openAttendanceProjector(m)}
+                          >
+                            <QrCode className="h-4 w-4" />
+                            {projectLoadingId === m.id ? "Loading QR…" : "Project attendance QR"}
+                          </button>
+                        )}
+                        {m.teamsJoinUrl && (
+                          <a
+                            href={m.teamsJoinUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn text-xs"
+                          >
+                            <Video className="h-4 w-4" /> Join Teams
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="card">
             <b className="mb-3 block text-sm text-slate-800 dark:text-slate-100">Pending verification</b>
@@ -238,7 +370,7 @@ export default function CommitteeWorkspace() {
                 <button
                   key={p.id}
                   onClick={() => setOpenActionId(p.id)}
-                  className="flex w-full items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm hover:bg-amber-100"
+                  className="flex w-full items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm hover:bg-amber-100 dark:hover:bg-amber-900/40"
                 >
                   <span>
                     <b>{p.referenceNo}</b> · {p.title}
@@ -253,42 +385,102 @@ export default function CommitteeWorkspace() {
           <div className="card">
             <div className="mb-3 flex items-center justify-between">
               <b className="text-sm font-bold text-slate-800 dark:text-slate-100">Committee Members</b>
-              {canMembers && (
-                <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
+                {canManage && (
                   <button
                     onClick={() => setShowSetChair(true)}
                     className="flex items-center gap-1 text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline"
                   >
                     <Crown className="h-3 w-3" /> Set Chair
                   </button>
+                )}
+                {canManage && canMembers && (
                   <span className="text-slate-300 dark:text-slate-600">·</span>
+                )}
+                {canMembers && (
                   <button
                     onClick={() => setShowAddMember(true)}
                     className="flex items-center gap-1 text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline"
                   >
                     <UserPlus className="h-3 w-3" /> Add Member
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
-            <div className="space-y-1.5 divide-y divide-slate-100 dark:divide-slate-800">
-              {detail.members.map((m) => (
-                <div key={m.userId} className="flex items-center justify-between py-1.5 text-sm">
-                  <span className="font-medium text-slate-800 dark:text-slate-200">{m.fullName}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${m.role === "CHAIRPERSON"
-                      ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                      : m.role === "SECRETARY"
-                        ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                      }`}
-                  >
-                    {m.role === "CHAIRPERSON" ? "Chairperson" : m.role === "SECRETARY" ? "Secretary" : "Member"}
-                  </span>
-                </div>
-              ))}
+            <p className="mb-2 text-xs text-slate-500">
+              {detail.members.length} active member{detail.members.length === 1 ? "" : "s"}
+              {canMembers ? " · Chairperson and Secretary can add or remove members" : ""}
+            </p>
+            <div className="max-h-72 space-y-1.5 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+              {detail.members.length === 0 && (
+                <p className="py-2 text-sm text-slate-400">No members listed yet.</p>
+              )}
+              {detail.members.map((m) => {
+                const isProtectedSeat =
+                  m.userId === detail.chairperson?.id || m.userId === detail.secretary?.id;
+                return (
+                  <div key={m.userId} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+                    <div className="min-w-0">
+                      <span className="font-medium text-slate-800 dark:text-slate-200">{m.fullName}</span>
+                      {m.email && (
+                        <span className="mt-0.5 block truncate text-xs text-slate-400">{m.email}</span>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          m.role === "CHAIRPERSON"
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                            : m.role === "SECRETARY"
+                              ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                              : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                      >
+                        {m.role === "CHAIRPERSON"
+                          ? "Chairperson"
+                          : m.role === "SECRETARY"
+                            ? "Secretary"
+                            : "Member"}
+                      </span>
+                      {canMembers && !isProtectedSeat && (
+                        <button
+                          type="button"
+                          className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                          title="Remove from committee"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (
+                              !window.confirm(
+                                `Remove ${m.fullName} from this committee?`,
+                              )
+                            ) {
+                              return;
+                            }
+                            try {
+                              await endpoints.removeCommitteeMember(committeeId, m.userId);
+                              flash(`${m.fullName} removed from the committee`);
+                              const d = await endpoints.committee(committeeId);
+                              setDetail(d);
+                            } catch (err: unknown) {
+                              flash(
+                                err instanceof ApiClientError
+                                  ? err.message
+                                  : "Could not remove member.",
+                                "error",
+                              );
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
+        </div>
         </div>
       )}
 
@@ -299,8 +491,9 @@ export default function CommitteeWorkspace() {
               <button
                 key={s}
                 onClick={() => setStatusFilter(s)}
-                className={`rounded-full px-3 py-1.5 text-xs font-medium ${statusFilter === s ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                  statusFilter === s ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-600"
+                }`}
               >
                 {s}
               </button>
@@ -322,11 +515,12 @@ export default function CommitteeWorkspace() {
                 <tr
                   key={a.id}
                   onClick={() => setOpenActionId(a.id)}
-                  className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                  className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/60"
                 >
                   <td className="py-2.5 font-medium text-slate-700 dark:text-slate-200">{a.referenceNo}</td>
                   <td className="py-2.5">{a.title}</td>
                   <td className="py-2.5">{a.owner.fullName}</td>
+                  <td className="py-2.5">{formatDate(a.dateRaised ?? a.createdAt)}</td>
                   <td className="py-2.5">
                     {formatDate(a.deadline)}
                     <br />
@@ -405,12 +599,13 @@ export default function CommitteeWorkspace() {
                       {min.meeting.reference} · {min.meeting.title}
                     </b>
                     <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${min.status === "APPROVED"
-                        ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                        : min.status === "ISSUED"
-                          ? "bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                        }`}
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        min.status === "APPROVED"
+                          ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                          : min.status === "ISSUED"
+                            ? "bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                      }`}
                     >
                       {min.status}
                     </span>
@@ -469,6 +664,15 @@ export default function CommitteeWorkspace() {
           }}
         />
       )}
+      {projectMeeting && (
+        <AttendanceQrProjector
+          meetingTitle={projectMeeting.title}
+          meetingReference={projectMeeting.reference}
+          checkInUrl={projectMeeting.checkInUrl}
+          onClose={() => setProjectMeeting(null)}
+        />
+      )}
+
       {openMeetingId && (
         <MeetingDetailPanel
           meetingId={openMeetingId}
@@ -483,35 +687,6 @@ export default function CommitteeWorkspace() {
           }}
         />
       )}
-
-      {
-        showAddMember && (
-          <AddMemberModal
-            committeeId={committeeId}
-            committeeName={detail.name}
-            existingMemberIds={detail.members.map((user) => user.userId)}
-            onClose={() => setShowAddMember(false)}
-            onAdded={() => {
-              refreshAll();
-            }}
-          />
-        )
-      }
-
-      {
-        showSetChair && (
-          <SetChairModal
-            committeeId={committeeId}
-            committeeName={detail.name}
-            currentChairperson={detail.chairperson}
-            onClose={() => setShowSetChair(false)}
-            onChanged={() => {
-              refreshAll();
-            }}
-          />
-        )
-      }
-
     </div>
   );
 }

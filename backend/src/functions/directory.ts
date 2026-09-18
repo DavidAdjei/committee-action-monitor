@@ -30,7 +30,7 @@ async function searchDirectory(req: HttpRequest, _ctx: InvocationContext): Promi
             }
           : {}),
       },
-      select: { id: true, fullName: true, email: true, department: true },
+      select: { id: true, fullName: true, email: true, department: true, isCentralCommittee: true },
       take: 20,
       orderBy: { fullName: "asc" },
     });

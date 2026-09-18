@@ -28,6 +28,7 @@ export interface DirectoryUser {
   id: number;
   fullName: string;
   email: string;
+  isCentralCommittee?: boolean;
   department: string | null;
 }
 
@@ -39,7 +40,7 @@ export interface CommitteeSummary {
   meetingFrequency: string | null;
   chairperson: { id: number; fullName: string };
   secretary: { id: number; fullName: string };
-  centralRep: { id: number; fullName: string };
+  centralRep?: { id: number; fullName: string } | null;
   myRole: CommitteeRole | null;
   canEdit: boolean;
   committeeId: number;
@@ -72,13 +73,13 @@ export interface CommitteeDetail {
   meetingFrequency: string | null;
   chairperson: { id: number; fullName: string };
   secretary: { id: number; fullName: string };
-  centralRep: { id: number; fullName: string };
+  centralRep?: { id: number; fullName: string } | null;
   myRole?: CommitteeRole | null;
   canEdit?: boolean;
   isCentralCommitteeViewOnly?: boolean;
   canManageCommittee?: boolean;
   canManageMembers?: boolean;
-  members: { userId: number; fullName: string; role: CommitteeRole }[];
+  members: { userId: number; fullName: string; email?: string; role: CommitteeRole }[];
   meetings: Meeting[];
   pendingVerification: {
     id: number;
@@ -108,6 +109,7 @@ export interface ActionListItem {
   deadline: string;
   revisedDeadline?: string | null;
   dateRaised?: string;
+  createdAt?: string;
   priority?: ActionPriority;
   status: ActionStatus;
   progress: number;

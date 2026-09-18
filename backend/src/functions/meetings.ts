@@ -1,10 +1,15 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
-import { requireViewCommittee, requireCommitteeOfficer } from "../lib/authorize";
+import { requireViewCommittee, requireCommitteeOfficer, isCommitteeOfficer } from "../lib/authorize";
 import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
 import { recordDenied } from "../services/auditService";
-import { createMeeting } from "../services/meetingService";
+import {
+  createMeeting,
+  markAttendance,
+  setAttendanceSheetUrl,
+  listAttendance,
+} from "../services/meetingService";
 
 async function listMeetings(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
@@ -17,8 +22,15 @@ async function listMeetings(req: HttpRequest, _ctx: InvocationContext): Promise<
     const meetings = await prisma.meeting.findMany({
       where: { committeeId },
       orderBy: { startsAt: "desc" },
+      include: { _count: { select: { attendance: true } } },
     });
-    return ok(meetings);
+    return ok(
+      meetings.map((m) => ({
+        ...m,
+        attendanceCount: m._count.attendance,
+        _count: undefined,
+      })),
+    );
   } catch (err) {
     return errorResponse(err);
   }
@@ -34,7 +46,6 @@ async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): 
     committeeId = Number(req.params.id);
     if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
 
-    // Server-side re-check: UI visibility is not a security control.
     await requireCommitteeOfficer(user, committeeId);
 
     const body = (await req.json()) as {
@@ -62,9 +73,6 @@ async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): 
       createdById: user.id,
     });
 
-    // NOTE: if teamsRequested, an integration worker should now call
-    // Microsoft Graph to create the online meeting and call
-    // attachTeamsEvent(meeting.id, eventId, joinUrl) — see meetingService.ts.
     return ok(meeting, 201);
   } catch (err) {
     if (err instanceof ApiError && err.status === 403) {
@@ -82,13 +90,10 @@ async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): 
 
 async function handleMeetings(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
-  
   if (req.method === "GET") return listMeetings(req, _ctx);
   if (req.method === "POST") return createMeetingHandler(req, _ctx);
-  
   return errorResponse(new Error("Method not allowed"));
 }
-
 
 async function meetingDetailHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
@@ -115,13 +120,19 @@ async function meetingDetailHandler(req: HttpRequest, _ctx: InvocationContext): 
             progress: true,
             owner: { select: { id: true, fullName: true } },
           },
-          orderBy: { deadline: "asc" },
+          orderBy: { createdAt: "desc" },
           take: 50,
+        },
+        attendance: {
+          include: { user: { select: { id: true, fullName: true, email: true, department: true } } },
+          orderBy: { markedAt: "asc" },
         },
       },
     });
     if (!meeting) throw Errors.notFound("Meeting");
     await requireViewCommittee(user, meeting.committeeId);
+
+    const officer = await isCommitteeOfficer(user.id, meeting.committeeId);
 
     return ok({
       id: meeting.id,
@@ -136,11 +147,107 @@ async function meetingDetailHandler(req: HttpRequest, _ctx: InvocationContext): 
       teamsRequested: meeting.teamsRequested,
       teamsEventId: meeting.teamsEventId,
       teamsJoinUrl: meeting.teamsJoinUrl,
+      attendanceToken: officer || user.isAdmin ? meeting.attendanceToken : undefined,
+      attendanceSheetUrl: meeting.attendanceSheetUrl,
+      attendance: meeting.attendance.map((a) => ({
+        userId: a.userId,
+        fullName: a.user.fullName,
+        email: a.user.email,
+        department: a.user.department,
+        method: a.method,
+        markedAt: a.markedAt,
+        note: a.note,
+      })),
       createdBy: meeting.createdBy,
       createdAt: meeting.createdAt,
       minutes: meeting.minutes,
       actionPoints: meeting.actionPoints,
     });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/** Check in via QR token or as authenticated officer (manual). */
+async function attendanceCheckIn(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const meetingId = Number(req.params.meetingId);
+    if (!Number.isInteger(meetingId)) throw Errors.badRequest("Invalid meeting id.");
+
+    const body = (await req.json().catch(() => ({}))) as {
+      token?: string;
+      method?: "QR" | "MANUAL";
+      userId?: number;
+      note?: string;
+    };
+
+    const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!meeting) throw Errors.notFound("Meeting");
+
+    const method = body.method === "MANUAL" ? "MANUAL" : "QR";
+    if (method === "MANUAL") {
+      await requireCommitteeOfficer(user, meeting.committeeId);
+      const targetId = body.userId ?? user.id;
+      const row = await markAttendance({
+        meetingId,
+        userId: targetId,
+        method: "MANUAL",
+        note: body.note,
+      });
+      return ok(row, 201);
+    }
+
+    const row = await markAttendance({
+      meetingId,
+      userId: user.id,
+      method: "QR",
+      token: body.token,
+    });
+    return ok(row, 201);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+async function attendanceSheetHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const meetingId = Number(req.params.meetingId);
+    if (!Number.isInteger(meetingId)) throw Errors.badRequest("Invalid meeting id.");
+
+    const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!meeting) throw Errors.notFound("Meeting");
+    await requireCommitteeOfficer(user, meeting.committeeId);
+
+    const body = (await req.json()) as { url?: string };
+    if (!body.url?.trim()) throw Errors.badRequest("url is required.");
+
+    const updated = await setAttendanceSheetUrl({
+      meetingId,
+      url: body.url.trim(),
+      actorUserId: user.id,
+    });
+    return ok(updated);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+async function listAttendanceHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const meetingId = Number(req.params.meetingId);
+    if (!Number.isInteger(meetingId)) throw Errors.badRequest("Invalid meeting id.");
+
+    const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!meeting) throw Errors.notFound("Meeting");
+    await requireViewCommittee(user, meeting.committeeId);
+
+    return ok(await listAttendance(meetingId));
   } catch (err) {
     return errorResponse(err);
   }
@@ -158,4 +265,25 @@ app.http("meetingDetail", {
   authLevel: "anonymous",
   route: "meetings/{meetingId}",
   handler: meetingDetailHandler,
+});
+
+app.http("meetingAttendanceCheckIn", {
+  methods: ["POST", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "meetings/{meetingId}/attendance/check-in",
+  handler: attendanceCheckIn,
+});
+
+app.http("meetingAttendanceSheet", {
+  methods: ["POST", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "meetings/{meetingId}/attendance/sheet",
+  handler: attendanceSheetHandler,
+});
+
+app.http("meetingAttendanceList", {
+  methods: ["GET", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "meetings/{meetingId}/attendance",
+  handler: listAttendanceHandler,
 });

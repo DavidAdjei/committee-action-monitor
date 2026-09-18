@@ -3,6 +3,7 @@ import { Search, UserPlus } from "lucide-react";
 import { Modal, ModalActions } from "@/components/Modal";
 import { endpoints } from "@/api/endpoints";
 import { useFlash } from "@/state/toastContext";
+import { useAuth } from "@/state/authContext";
 import type { DirectoryUser } from "@/types";
 
 export function AddMemberModal({
@@ -19,6 +20,8 @@ export function AddMemberModal({
   onAdded: () => void;
 }) {
   const flash = useFlash();
+  const { me } = useAuth();
+  const canAssignChair = Boolean(me?.isCentralCommittee || me?.isAdmin);
   const [query, setQuery] = useState("");
   const [candidates, setCandidates] = useState<DirectoryUser[]>([]);
   const [selectedUser, setSelectedUser] = useState<DirectoryUser | null>(null);
@@ -110,7 +113,7 @@ export function AddMemberModal({
                   type="button"
                   key={c.id}
                   onClick={() => setSelectedUser(c)}
-                  className="flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+                  className="flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:hover:bg-slate-700 transition"
                 >
                   <span className="font-medium text-slate-700 dark:text-slate-200">{c.fullName}</span>
                   <span className="text-slate-400">{c.department ?? c.email}</span>
@@ -134,10 +137,14 @@ export function AddMemberModal({
           >
             <option value="MEMBER">Member (Standard member)</option>
             <option value="SECRETARY">Secretary (Minutes & meetings officer)</option>
-            <option value="CHAIRPERSON">Chairperson (Committee Leader)</option>
+            {canAssignChair && (
+              <option value="CHAIRPERSON">Chairperson (Committee Leader)</option>
+            )}
           </select>
           <small className="text-slate-400 font-normal">
-            Assigning Chairperson will automatically update committee leadership.
+            {canAssignChair
+              ? "Assigning Chairperson will automatically update committee leadership."
+              : "Chairperson assignment is reserved for Central Committee (use Set Chair)."}
           </small>
         </label>
 

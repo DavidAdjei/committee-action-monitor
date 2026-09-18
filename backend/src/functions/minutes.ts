@@ -9,6 +9,7 @@ import {
   approveMinutes,
   getMinutesDetail,
   listMinutesForMeeting,
+  getMinutesIssuedMailPayload,
 } from "../services/minutesService";
 
 async function listMinutesForMeetingHandler(
@@ -108,7 +109,51 @@ async function issueMinutesHandler(req: HttpRequest, _ctx: InvocationContext): P
     const body = (await req.json().catch(() => ({}))) as { documentUrl?: string };
     await issueMinutes(minutesId, user.id, body.documentUrl);
     const detail = await getMinutesDetail(minutesId);
-    return ok(detail);
+    // Mail payload includes attendance CSV as an attachment for the delivery worker / UI notice
+    let mail: { subject: string; attachmentNames: string[] } | null = null;
+    try {
+      const payload = await getMinutesIssuedMailPayload(minutesId);
+      mail = {
+        subject: payload.subject,
+        attachmentNames: payload.attachments.map((a) => a.filename),
+      };
+    } catch {
+      mail = null;
+    }
+    return ok({ ...detail, mail });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+async function minutesMailPreviewHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const minutesId = Number(req.params.minutesId);
+    if (!Number.isInteger(minutesId)) throw Errors.badRequest("Invalid minutes id.");
+
+    const existing = await prisma.meetingMinutes.findUnique({
+      where: { id: minutesId },
+      include: { meeting: true },
+    });
+    if (!existing) throw Errors.notFound("Minutes");
+    await requireViewCommittee(user, existing.meeting.committeeId);
+
+    const payload = await getMinutesIssuedMailPayload(minutesId);
+    return ok({
+      subject: payload.subject,
+      htmlBody: payload.htmlBody,
+      textBody: payload.textBody,
+      attachments: payload.attachments.map((a) => ({
+        filename: a.filename,
+        contentType: a.contentType,
+        /** Inline content for download/preview; Graph worker base64-encodes this */
+        content: a.content,
+        encoding: a.encoding,
+      })),
+      recipientCount: payload.recipientUserIds.length,
+    });
   } catch (err) {
     return errorResponse(err);
   }

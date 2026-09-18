@@ -87,7 +87,6 @@ export default function DevSignIn() {
                 <div className="min-w-0 flex-1">
                   <b className="text-sm text-slate-900 dark:text-slate-100">{u.fullName}</b>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {u.department ?? "—"}
                     {u.isAdmin
                       ? " · Central Committee Administrator"
                       : u.isCentralCommittee

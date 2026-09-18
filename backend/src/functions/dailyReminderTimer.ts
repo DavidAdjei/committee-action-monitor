@@ -1,21 +1,24 @@
 import { app, InvocationContext, Timer } from "@azure/functions";
 import { runDailyReminderAndEscalation } from "../services/escalationService";
+import { runMeetingFollowUpReminders } from "../services/meetingFollowUpService";
 
 /**
- * Runs at 08:00 UTC daily — matches the documented "daily reminders begin
- * 14 days before the deadline" and "escalated without duplicate
- * notifications" rules (mysql/daily_reminder.sql, now implemented as an
- * application-layer job with the same idempotency guarantees).
- * Adjust the CRON to the Bank's preferred local business-hours equivalent.
+ * Daily 07:00 UTC job:
+ *  - Action deadline reminders + overdue escalations
+ *  - Post-meeting secretary alerts:
+ *      • Day after meeting, 07:00 — no action points yet → MEETING_ACTIONS_REMINDER
+ *      • Two days after meeting — no minutes yet → MEETING_MINUTES_REMINDER
  */
 async function dailyReminderTimer(_timer: Timer, ctx: InvocationContext): Promise<void> {
-  const result = await runDailyReminderAndEscalation();
+  const actionResult = await runDailyReminderAndEscalation();
+  const meetingResult = await runMeetingFollowUpReminders();
   ctx.log(
-    `Daily reminder/escalation run complete: ${result.remindersQueued} reminders queued, ${result.escalated} actions escalated to OVERDUE.`,
+    `Daily job complete: ${actionResult.remindersQueued} action reminders, ${actionResult.escalated} escalated; ` +
+      `${meetingResult.actionsReminders} meeting-actions alerts, ${meetingResult.minutesReminders} minutes alerts queued.`,
   );
 }
 
 app.timer("dailyReminderTimer", {
-  schedule: "0 0 8 * * *",
+  schedule: "0 0 7 * * *",
   handler: dailyReminderTimer,
 });

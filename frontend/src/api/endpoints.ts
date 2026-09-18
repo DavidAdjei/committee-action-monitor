@@ -48,11 +48,20 @@ export const endpoints = {
   }) => api.post(`/committees`, data),
   addCommitteeMember: (committeeId: number, data: { userId: number; role?: string }) =>
     api.post(`/committees/${committeeId}/members`, data),
+  removeCommitteeMember: (committeeId: number, userId: number) =>
+    api.delete(`/committees/${committeeId}/members/${userId}`),
   setCommitteeChair: (committeeId: number, data: { chairpersonId: number }) =>
     api.patch(`/committees/${committeeId}/chair`, data),
+  setCommitteeCentralRep: (committeeId: number, data: { centralRepId: number | null }) =>
+    api.patch(`/committees/${committeeId}/central-rep`, data),
 
   meetings: (committeeId: number) => api.get<Meeting[]>(`/committees/${committeeId}/meetings`),
   meetingDetail: (meetingId: number) => api.get(`/meetings/${meetingId}`),
+  attendanceCheckIn: (meetingId: number, data: { token?: string; method?: string; userId?: number; note?: string }) =>
+    api.post(`/meetings/${meetingId}/attendance/check-in`, data),
+  setAttendanceSheet: (meetingId: number, url: string) =>
+    api.post(`/meetings/${meetingId}/attendance/sheet`, { url }),
+  listAttendance: (meetingId: number) => api.get(`/meetings/${meetingId}/attendance`),
   createMeeting: (
     committeeId: number,
     data: {
@@ -81,6 +90,14 @@ export const endpoints = {
   issueMinutes: (minutesId: number, data?: { documentUrl?: string }) =>
     api.post<MeetingMinutes>(`/minutes/${minutesId}/issue`, data ?? {}),
   approveMinutes: (minutesId: number) => api.post<MeetingMinutes>(`/minutes/${minutesId}/approve`, {}),
+  minutesMailPreview: (minutesId: number) =>
+    api.get<{
+      subject: string;
+      htmlBody: string;
+      textBody: string;
+      attachments: { filename: string; contentType: string; content: string; encoding: string }[];
+      recipientCount: number;
+    }>(`/minutes/${minutesId}/mail-preview`),
 
   actionsForCommittee: (committeeId: number, params?: { status?: string; q?: string }) => {
     const qs = new URLSearchParams();
@@ -89,11 +106,19 @@ export const endpoints = {
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return api.get<ActionListItem[]>(`/committees/${committeeId}/actions${suffix}`);
   },
-  allActions: (params?: { status?: string; q?: string; page?: number }) => {
+  allActions: (params?: {
+    status?: string;
+    q?: string;
+    page?: number;
+    pageSize?: number;
+    committeeId?: number;
+  }) => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
     if (params?.q) qs.set("q", params.q);
     if (params?.page) qs.set("page", String(params.page));
+    if (params?.pageSize) qs.set("pageSize", String(params.pageSize));
+    if (params?.committeeId) qs.set("committeeId", String(params.committeeId));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return api.get<{ total: number; page: number; pageSize: number; items: ActionListItem[] }>(
       `/actions${suffix}`,
@@ -107,7 +132,7 @@ export const endpoints = {
       title: string;
       description?: string;
       ownerId: number;
-      dateRaised: string;
+      dateRaised?: string;
       deadline: string;
       priority?: string;
       minutesReference?: string;

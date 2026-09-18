@@ -46,6 +46,7 @@ model User {
   actionUpdatesAuthored ActionUpdate[]
   stakeholderOf         ActionStakeholder[]
   notifications         Notification[]
+  attendanceRecords   MeetingAttendance[]
   evidenceUploaded      EvidenceFile[]
   meetingsCreated       Meeting[]
   minutesCreated        MeetingMinutes[]
@@ -66,13 +67,14 @@ model Committee {
   meetingFrequency String?  @map("meeting_frequency") @db.VarChar(60)
   chairpersonId    Int      @map("chairperson_id")
   secretaryId      Int      @map("secretary_id")
-  centralRepId     Int      @map("central_rep_id")
+  /// Optional at DB level (e.g. seed without a rep). App may still collect it on create.
+  centralRepId     Int?     @map("central_rep_id")
   active           Boolean  @default(true)
   createdAt        DateTime @default(now()) @map("created_at")
 
   chairperson  User                  @relation("CommitteeChair", fields: [chairpersonId], references: [id])
   secretary    User                  @relation("CommitteeSecretary", fields: [secretaryId], references: [id])
-  centralRep   User                  @relation("CommitteeCentralRep", fields: [centralRepId], references: [id])
+  centralRep   User?                 @relation("CommitteeCentralRep", fields: [centralRepId], references: [id])
   memberships  CommitteeMembership[]
   meetings     Meeting[]
   actionPoints ActionPoint[]
@@ -123,16 +125,42 @@ model Meeting {
   teamsRequested Boolean @default(false) @map("teams_requested")
   teamsEventId  String?  @map("teams_event_id") @db.VarChar(255)
   teamsJoinUrl  String?  @map("teams_join_url") @db.Text
+  /// Shared secret embedded in the attendance QR / check-in link
+  attendanceToken String? @map("attendance_token") @db.VarChar(64)
+  /// Optional uploaded attendance sheet (SharePoint / blob URL)
+  attendanceSheetUrl String? @map("attendance_sheet_url") @db.Text
   createdById   Int      @map("created_by_id")
   createdAt     DateTime @default(now()) @map("created_at")
 
-  committee    Committee        @relation(fields: [committeeId], references: [id])
-  createdBy    User             @relation(fields: [createdById], references: [id])
+  committee    Committee            @relation(fields: [committeeId], references: [id])
+  createdBy    User                 @relation(fields: [createdById], references: [id])
   actionPoints ActionPoint[]
   minutes      MeetingMinutes[]
+  attendance   MeetingAttendance[]
 
   @@unique([committeeId, reference], name: "uq_committee_meeting_reference")
   @@map("meetings")
+}
+
+enum AttendanceMethod {
+  QR
+  UPLOAD
+  MANUAL
+}
+
+model MeetingAttendance {
+  id        Int              @id @default(autoincrement())
+  meetingId Int              @map("meeting_id")
+  userId    Int              @map("user_id")
+  method    AttendanceMethod @default(QR)
+  markedAt  DateTime         @default(now()) @map("marked_at")
+  note      String?          @db.VarChar(255)
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([meetingId, userId], name: "uq_meeting_attendee")
+  @@map("meeting_attendance")
 }
 
 enum MinutesStatus {
@@ -149,7 +177,8 @@ enum MinutesSource {
 
 model MeetingMinutes {
   id               Int           @id @default(autoincrement())
-  meetingId        Int           @map("meeting_id")
+  /// At most one minutes pack per meeting
+  meetingId        Int           @unique @map("meeting_id")
   status           MinutesStatus @default(DRAFT)
   sourcePopulation MinutesSource @default(LATEST_MEETING) @map("source_population")
   discussion       String?       @db.Text
@@ -321,6 +350,10 @@ enum NotificationType {
   EVIDENCE_SUBMITTED
   EVIDENCE_VERIFIED
   MINUTES_ISSUED
+  /// Secretary: meeting had no action points by 07:00 the day after the meeting
+  MEETING_ACTIONS_REMINDER
+  /// Secretary: meeting still has no minutes the day after the actions reminder
+  MEETING_MINUTES_REMINDER
 }
 
 enum DeliveryStatus {
