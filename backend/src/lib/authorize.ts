@@ -31,9 +31,9 @@ export async function isCommitteeOfficer(userId: number, committeeId: number): P
 
 /** Throws 403 unless the user is the active Chairperson or Secretary of the committee. */
 export async function requireCommitteeOfficer(user: User, committeeId: number): Promise<void> {
-  if (user.isCentralCommittee) {
-    // Central Committee Member access is explicitly read-only — being a
-    // Central member is never sufficient authority to write, even here.
+  if (isCentralMember(user)) {
+    // Central Committee access is read-only for writes — sub-role does not
+    // grant Chair/Secretary powers on a sub-committee.
   }
   const authorized = await isCommitteeOfficer(user.id, committeeId);
   if (!authorized) {
@@ -43,7 +43,7 @@ export async function requireCommitteeOfficer(user: User, committeeId: number): 
 
 /** True if the user can view the committee: Central Committee (bank-wide) or an active member. */
 export async function canViewCommittee(user: User, committeeId: number): Promise<boolean> {
-  if (user.isCentralCommittee) return true;
+  if (isCentralMember(user)) return true;
   const membership = await prisma.committeeMembership.findFirst({
     where: { userId: user.id, committeeId, active: true },
   });
@@ -55,14 +55,34 @@ export async function requireViewCommittee(user: User, committeeId: number): Pro
   if (!allowed) throw Errors.forbidden("You do not have access to this committee.");
 }
 
+type UserWithCentral = User & { centralRole?: "MEMBER" | "ADMINISTRATOR" | null };
+
+function centralRoleOf(user: User): "MEMBER" | "ADMINISTRATOR" | null {
+  const u = user as UserWithCentral;
+  if (u.centralRole === "MEMBER" || u.centralRole === "ADMINISTRATOR") return u.centralRole;
+  if (user.isAdmin) return "ADMINISTRATOR";
+  if (user.isCentralCommittee) return "MEMBER";
+  return null;
+}
+
+/** Central Committee member (any sub-role). All Central members share equal oversight rights. */
+export function isCentralMember(user: User): boolean {
+  return centralRoleOf(user) !== null;
+}
+
+/** Central Committee Administrator sub-role only (create committees, set chairs, etc.). */
+export function isCentralAdministrator(user: User): boolean {
+  return centralRoleOf(user) === "ADMINISTRATOR";
+}
+
 export async function requireAdmin(user: User): Promise<void> {
-  if (!user.isAdmin) {
+  if (!isCentralAdministrator(user)) {
     throw Errors.forbidden("Only a Central Committee Administrator may do this.");
   }
 }
 
 export async function requireCentralCommittee(user: User): Promise<void> {
-  if (!user.isCentralCommittee && !user.isAdmin) {
-    throw Errors.forbidden("Only Central Committee members or Administrators may do this.");
+  if (!isCentralMember(user)) {
+    throw Errors.forbidden("Only Central Committee members may do this.");
   }
 }

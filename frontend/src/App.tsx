@@ -7,6 +7,7 @@ import Committees from "@/pages/Committees";
 import CommitteeWorkspace from "@/pages/CommitteeWorkspace";
 import ActionPoints from "@/pages/ActionPoints";
 import Notifications from "@/pages/Notifications";
+import CalendarPage from "@/pages/Calendar";
 
 import { LoadingLogo } from "@/components/LoadingLogo";
 
@@ -50,6 +51,16 @@ export default function App() {
         element={
           <RequireAuth>
             <ActionPoints />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/calendar"
+        element={
+          <RequireAuth>
+            <Layout>
+              <CalendarPage />
+            </Layout>
           </RequireAuth>
         }
       />

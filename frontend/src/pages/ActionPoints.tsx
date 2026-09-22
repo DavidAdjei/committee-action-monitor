@@ -148,7 +148,7 @@ export default function ActionPoints() {
                   <tr
                     key={a.id}
                     onClick={() => setOpenActionId(a.id)}
-                    className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:border-slate-800 dark:hover:bg-slate-800/50"
+                    className="cursor-pointer border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:border-slate-800 dark:hover:bg-slate-800/50"
                   >
                     <td className="py-2.5 pr-3 font-medium text-slate-700 dark:text-slate-200">{a.referenceNo}</td>
                     <td className="py-2.5 pr-3">{a.title}</td>

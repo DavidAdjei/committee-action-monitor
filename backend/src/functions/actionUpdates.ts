@@ -25,7 +25,10 @@ async function createUpdateHandler(req: HttpRequest, _ctx: InvocationContext): P
     // Cancel: Chairperson/Secretary only.
     // Officers do not record progress on behalf of the owner.
     const officer = await isCommitteeOfficer(user.id, action.committeeId);
-    const isOwner = action.ownerId === user.id;
+    const ownerStakeholder = await prisma.actionStakeholder.findFirst({
+      where: { actionPointId: action.id, userId: user.id, stakeholderType: "ACTION_OWNER" },
+    });
+    const isOwner = action.ownerId === user.id || Boolean(ownerStakeholder);
 
     const body = (await req.json()) as {
       status?: "IN_PROGRESS" | "OVERDUE" | "COMPLETED" | "CANCELLED";

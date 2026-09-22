@@ -56,6 +56,26 @@ export const endpoints = {
     api.patch(`/committees/${committeeId}/central-rep`, data),
 
   meetings: (committeeId: number) => api.get<Meeting[]>(`/committees/${committeeId}/meetings`),
+  myMeetings: (params?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set("from", params.from);
+    if (params?.to) qs.set("to", params.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return api.get<
+      {
+        id: number;
+        reference: string;
+        title: string;
+        startsAt: string;
+        endsAt: string | null;
+        venue: string | null;
+        agenda?: string | null;
+        teamsJoinUrl?: string | null;
+        attendanceCount?: number;
+        committee: { id: number; name: string; code: string };
+      }[]
+    >(`/me/meetings${suffix}`);
+  },
   meetingDetail: (meetingId: number) => api.get(`/meetings/${meetingId}`),
   attendanceCheckIn: (meetingId: number, data: { token?: string; method?: string; userId?: number; note?: string }) =>
     api.post(`/meetings/${meetingId}/attendance/check-in`, data),
@@ -86,10 +106,34 @@ export const endpoints = {
       documentUrl?: string;
     },
   ) => api.post<MeetingMinutes>(`/meetings/${meetingId}/minutes`, data),
+  /** Find-or-create actions (multi-owner) and optionally create minutes linked to them */
+  importMinutes: (
+    meetingId: number,
+    data: {
+      discussion?: string;
+      documentUrl?: string;
+      actionsOnly?: boolean;
+      sourcePopulation?: string;
+      actions: {
+        title: string;
+        description?: string;
+        ownerIds: number[];
+        deadline?: string;
+        priority?: string;
+      }[];
+    },
+  ) =>
+    api.post<{
+      minutes: MeetingMinutes | null;
+      actions: { actionId: number; created: boolean; title: string }[];
+      summary: { created: number; linkedExisting: number };
+    }>(`/meetings/${meetingId}/minutes/import`, data),
   getMinutes: (minutesId: number) => api.get<MeetingMinutes>(`/minutes/${minutesId}`),
   issueMinutes: (minutesId: number, data?: { documentUrl?: string }) =>
     api.post<MeetingMinutes>(`/minutes/${minutesId}/issue`, data ?? {}),
   approveMinutes: (minutesId: number) => api.post<MeetingMinutes>(`/minutes/${minutesId}/approve`, {}),
+  exportMinutesUrl: (minutesId: number) => `/minutes/${minutesId}/export`,
+  exportMinutes: (minutesId: number) => api.download(`/minutes/${minutesId}/export`, `minutes-${minutesId}.docx`),
   minutesMailPreview: (minutesId: number) =>
     api.get<{
       subject: string;
@@ -132,6 +176,7 @@ export const endpoints = {
       title: string;
       description?: string;
       ownerId: number;
+      ownerIds?: number[];
       dateRaised?: string;
       deadline: string;
       priority?: string;

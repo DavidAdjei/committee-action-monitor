@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { Bell, Building2, LayoutDashboard, ListChecks, LogOut, ShieldCheck, Moon, Sun, Menu, X } from "lucide-react";
+import { Bell, Building2, CalendarDays, LayoutDashboard, ListChecks, LogOut, ShieldCheck, Moon, Sun, Menu, X } from "lucide-react";
 import { useAuth } from "@/state/authContext";
 import { useTheme } from "@/state/themeContext";
 import { useLoadingStore } from "@/state/loadingStore";
@@ -22,7 +22,7 @@ function NavItem({
       to={to}
       onClick={onClick}
       className={({ isActive }) =>
-        `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
+        `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${
           isActive ? "bg-brand-600 text-white shadow-sm" : "text-slate-200 hover:bg-white/10"
         }`
       }
@@ -106,6 +106,12 @@ export function Layout({ children }: { children: ReactNode }) {
             onClick={closeMobile}
           />
           <NavItem
+            to="/calendar"
+            icon={<CalendarDays className="h-4 w-4" />}
+            label="Calendar"
+            onClick={closeMobile}
+          />
+          <NavItem
             to="/notifications"
             icon={<Bell className="h-4 w-4" />}
             label="Notifications"
@@ -127,6 +133,8 @@ export function Layout({ children }: { children: ReactNode }) {
   );
 
   return (
+    <>
+    <a href="#main-content" className="skip-link">Skip to main content</a>
     <div className="flex min-h-screen bg-slate-100 dark:bg-slate-950">
       {/* Top global loading progress bar */}
       {isGlobalLoading && (
@@ -165,7 +173,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
-              className="mr-1 rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 md:hidden dark:text-slate-300"
+              className="mr-1 rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 md:hidden dark:text-slate-300 dark:hover:bg-slate-800"
               onClick={() => setMobileNavOpen(true)}
               aria-label="Open menu"
             >
@@ -179,7 +187,8 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="flex shrink-0 items-center gap-2 sm:gap-4">
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition text-slate-600 dark:text-slate-300"
+                aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 dark:hover:bg-slate-800 transition text-slate-600 dark:text-slate-300"
               title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
             >
               {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
@@ -188,6 +197,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <div className="flex items-center gap-2 sm:gap-3">
               <div className="hidden text-right sm:block">
                 <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{me.fullName}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">{me.department ?? "—"}</div>
               </div>
               <div className="grid h-9 w-9 place-items-center rounded-full bg-brand-100 dark:bg-brand-900 text-xs font-bold text-brand-700 dark:text-brand-200">
                 {initials(me.fullName)}
@@ -195,10 +205,11 @@ export function Layout({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
-        <main className="flex-1 overflow-x-auto px-4 py-4 sm:px-6 sm:py-6 md:px-8 bg-slate-50 dark:bg-slate-950">
+        <main id="main-content" className="flex-1 overflow-x-auto px-4 py-4 sm:px-6 sm:py-6 md:px-8 bg-slate-50 dark:bg-slate-950">
           {children}
         </main>
       </div>
     </div>
+    </>
   );
 }

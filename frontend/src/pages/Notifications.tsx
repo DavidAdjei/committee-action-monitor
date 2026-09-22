@@ -155,7 +155,7 @@ export default function Notifications() {
           <p className="text-slate-400">No notifications match this filter.</p>
         </div>
       ) : (
-        <div className="card divide-y divide-slate-100 overflow-hidden p-0 dark:divide-slate-800">
+        <div className="card divide-y divide-slate-100 dark:divide-slate-700 overflow-hidden p-0 dark:divide-slate-800">
           {filtered.map((n) => (
             <button
               key={n.id}
@@ -170,7 +170,7 @@ export default function Notifications() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <b className={`text-sm ${!n.readAt ? "text-slate-900 dark:text-slate-100" : "text-slate-600 dark:text-slate-300"}`}>
+                  <b className={`text-sm ${!n.readAt ? "text-slate-900 dark:text-slate-100 dark:text-slate-100" : "text-slate-600 dark:text-slate-300"}`}>
                     {TYPE_LABELS[n.notificationType] ?? n.notificationType}
                   </b>
                   <span className="shrink-0 text-xs text-slate-400">

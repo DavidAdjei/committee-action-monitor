@@ -92,6 +92,7 @@ async function createActionHandler(req: HttpRequest, _ctx: InvocationContext): P
       title?: string;
       description?: string;
       ownerId?: number;
+      ownerIds?: number[];
       dateRaised?: string;
       deadline?: string;
       priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -99,9 +100,17 @@ async function createActionHandler(req: HttpRequest, _ctx: InvocationContext): P
       additionalStakeholderIds?: number[];
     };
 
-    if (!body.meetingId || !body.title || !body.ownerId || !body.deadline) {
+    const ownerIds = [
+      ...new Set(
+        [...(body.ownerIds ?? []), ...(body.ownerId != null ? [body.ownerId] : [])].filter(
+          (id): id is number => typeof id === "number" && Number.isInteger(id),
+        ),
+      ),
+    ];
+
+    if (!body.meetingId || !body.title || ownerIds.length === 0 || !body.deadline) {
       throw Errors.badRequest(
-        "meetingId, title, ownerId and deadline are required.",
+        "meetingId, title, ownerId/ownerIds and deadline are required.",
       );
     }
 
@@ -110,7 +119,8 @@ async function createActionHandler(req: HttpRequest, _ctx: InvocationContext): P
       committeeId,
       title: body.title,
       description: body.description,
-      ownerId: body.ownerId,
+      ownerId: ownerIds[0],
+      ownerIds,
       // Start date is always the creation moment — not client-supplied.
       dateRaised: new Date(),
       deadline: new Date(body.deadline),

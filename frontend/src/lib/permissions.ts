@@ -85,12 +85,17 @@ export function canUpdateAction(
   opts: {
     committeeId: number;
     ownerId: number;
+    /** Any co-owner may update progress when provided */
+    ownerIds?: number[];
     status: string;
     isOfficerStakeholder?: boolean;
   },
 ): boolean {
   if (!me) return false;
   if (["COMPLETED", "CANCELLED"].includes(opts.status)) return false;
+  if (opts.ownerIds && opts.ownerIds.length > 0) {
+    return opts.ownerIds.includes(me.id);
+  }
   return opts.ownerId === me.id;
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, ExternalLink, FileText, Loader2, Send } from "lucide-react";
+import { CheckCircle2, Download, ExternalLink, FileText, Loader2, Send } from "lucide-react";
 import { Modal, ModalActions } from "@/components/Modal";
 import { StatusPill, formatDate } from "@/components/StatusBits";
 import { endpoints } from "@/api/endpoints";
@@ -61,6 +61,18 @@ export function MinutesDetailPanel({
     });
   }, [minutesId]);
 
+  const download = async () => {
+    try {
+      setBusy(true);
+      await endpoints.exportMinutes(minutesId);
+      flash("Minutes document downloaded");
+    } catch (err: unknown) {
+      flash(err instanceof ApiClientError ? err.message : "Could not download minutes.", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!detail) {
     return (
       <Modal title="Minutes" onClose={onClose} wide>
@@ -80,7 +92,7 @@ export function MinutesDetailPanel({
         documentUrl: documentUrl.trim() || undefined,
       });
       setDetail(updated);
-      flash("Minutes issued — stakeholders notified (attendance CSV attached to email)");
+      flash("Minutes issued — Word minutes + attendance CSV attached to stakeholder email");
       onChanged();
     } catch (err: unknown) {
       flash(err instanceof ApiClientError ? err.message : "Could not issue minutes.", "error");
@@ -193,7 +205,7 @@ export function MinutesDetailPanel({
               </thead>
               <tbody>
                 {detail.snapshots.map((s) => (
-                  <tr key={s.actionPointId} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
+                  <tr key={s.actionPointId} className="border-b border-slate-100 dark:border-slate-700 last:border-0 dark:border-slate-800">
                     <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200">{s.referenceNo}</td>
                     <td className="px-3 py-2">
                       <div>{s.title}</div>
@@ -267,7 +279,7 @@ export function MinutesDetailPanel({
           <hr className="my-2 border-slate-200 dark:border-slate-700" />
           <p className="font-semibold">1. Attendance</p>
           <p className="mb-1 text-[11px] text-brand-700 dark:text-brand-300">
-            Email delivery attaches the attendance register as a CSV file.
+            Email includes a short message with the Word minutes (bank template) and attendance CSV attached.
           </p>
           <ul className="mb-2 list-inside list-disc text-xs">
             {attendanceList.map((a, i) => (
@@ -290,6 +302,9 @@ export function MinutesDetailPanel({
       <ModalActions>
         <button type="button" className="btn" onClick={onClose}>
           Close
+        </button>
+        <button type="button" className="btn" disabled={busy} onClick={() => void download()}>
+          <Download className="h-4 w-4" /> Download Word
         </button>
         {canManage && detail.status === "DRAFT" && (
           <button type="button" className="btn-primary" disabled={busy} onClick={issue}>

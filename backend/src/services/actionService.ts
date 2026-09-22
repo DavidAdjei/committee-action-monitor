@@ -29,7 +29,10 @@ export interface CreateActionPointInput {
   committeeId: number;
   title: string;
   description?: string;
+  /** Primary owner (legacy / required). Prefer ownerIds when multiple. */
   ownerId: number;
+  /** All owners — each stored as ACTION_OWNER stakeholder; ownerId defaults to first. */
+  ownerIds?: number[];
   dateRaised: Date;
   deadline: Date;
   priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -70,7 +73,7 @@ export async function createActionPoint(input: CreateActionPointInput) {
         title: input.title,
         description: input.description,
         minutesReference: input.minutesReference,
-        ownerId: input.ownerId,
+        ownerId: (input.ownerIds && input.ownerIds[0]) || input.ownerId,
         dateRaised: input.dateRaised,
         deadline: input.deadline,
         priority: input.priority ?? "MEDIUM",
@@ -79,14 +82,14 @@ export async function createActionPoint(input: CreateActionPointInput) {
       },
     });
 
+    const ownerIds = [...new Set([...(input.ownerIds ?? []), input.ownerId].filter(Boolean))];
     const mandatory: { userId: number; stakeholderType: StakeholderType }[] = [
       { userId: committee.chairpersonId, stakeholderType: "CHAIRPERSON" },
       { userId: committee.secretaryId, stakeholderType: "SECRETARY" },
       ...(committee.centralRepId
         ? [{ userId: committee.centralRepId, stakeholderType: "CENTRAL_COMMITTEE" as const }]
         : []),
-      { userId: input.ownerId, stakeholderType: "ACTION_OWNER" },
-      
+      ...ownerIds.map((userId) => ({ userId, stakeholderType: "ACTION_OWNER" as StakeholderType })),
     ];
     const additional = (input.additionalStakeholderIds ?? [])
       .filter((id) => !mandatory.some((m) => m.userId === id))

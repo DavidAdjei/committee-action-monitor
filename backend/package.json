@@ -1,7 +1,7 @@
 {
   "name": "committee-action-monitor-api",
   "version": "1.0.0",
-  "description": "Committee Action Monitor — Azure Functions (TypeScript) API backed by Prisma/MySQL",
+  "description": "Committee Action Monitor \u2014 Azure Functions (TypeScript) API backed by Prisma/MySQL",
   "main": "dist/src/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -17,7 +17,8 @@
   },
   "dependencies": {
     "@azure/functions": "^4.5.1",
-    "@prisma/client": "^5.20.0"
+    "@prisma/client": "^5.20.0",
+    "docx": "^9.5.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.9",

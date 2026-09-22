@@ -46,6 +46,7 @@ async function devUsers(req: HttpRequest, _ctx: InvocationContext): Promise<Http
         department: u.department,
         isCentralCommittee: u.isCentralCommittee,
         isAdmin: u.isAdmin,
+        centralRole: u.isAdmin ? "ADMINISTRATOR" : u.isCentralCommittee ? "MEMBER" : null,
         memberships: u.memberships.map((m) => ({
           committeeId: m.committeeId,
           role: m.role,

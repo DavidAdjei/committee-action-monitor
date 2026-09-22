@@ -16,41 +16,48 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const getIcon = (type: string) => {
     switch (type) {
       case "success":
-        return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
+        return <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" aria-hidden />;
       case "error":
-        return <AlertCircle className="h-4 w-4 text-red-400" />;
+        return <AlertCircle className="h-4 w-4 shrink-0 text-red-200" aria-hidden />;
       case "info":
       default:
-        return <Info className="h-4 w-4 text-blue-400" />;
+        return <Info className="h-4 w-4 shrink-0 text-sky-200" aria-hidden />;
     }
   };
 
   const getStyles = (type: string) => {
     switch (type) {
       case "error":
-        return "bg-red-900 text-red-50";
+        return "bg-red-900 text-red-50 border border-red-700";
       case "info":
-        return "bg-blue-900 text-blue-50";
+        return "bg-slate-800 text-slate-50 border border-slate-600 dark:bg-slate-800";
       case "success":
       default:
-        return "bg-slate-900 text-white";
+        return "bg-slate-900 text-white border border-slate-700 dark:bg-slate-800 dark:border-slate-600";
     }
   };
 
   return (
     <ToastContext.Provider value={flash}>
       {children}
-      <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-col gap-2">
+      <div
+        className="pointer-events-none fixed bottom-6 left-1/2 z-50 flex w-[min(100%-2rem,24rem)] -translate-x-1/2 flex-col gap-2"
+        aria-live="polite"
+        aria-relevant="additions"
+      >
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg ${getStyles(t.type)}`}
+            role="status"
+            className={`pointer-events-auto flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg ${getStyles(t.type)}`}
           >
             {getIcon(t.type)}
-            {t.message}
+            <span className="min-w-0 flex-1">{t.message}</span>
             <button
+              type="button"
               onClick={() => removeToast(t.id)}
-              className="ml-2 text-xs opacity-70 hover:opacity-100"
+              className="ml-1 shrink-0 rounded px-1.5 py-0.5 text-xs opacity-80 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+              aria-label="Dismiss notification"
             >
               ✕
             </button>

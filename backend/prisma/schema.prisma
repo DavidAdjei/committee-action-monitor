@@ -30,10 +30,13 @@ model User {
   email          String   @unique @db.VarChar(190)
   department     String?  @db.VarChar(160)
   active         Boolean  @default(true)
-  // Bank-wide read-only oversight role. Distinct from any sub-committee role.
+  // Bank-wide Central Committee membership (true when centralRole is set).
   isCentralCommittee Boolean @default(false) @map("is_central_committee")
-  // Central Committee Administrator: may create committees and set leadership.
+  // Platform admin flag — true only for Central Committee ADMINISTRATOR sub-role.
   isAdmin        Boolean  @default(false) @map("is_admin")
+  /// Sub-role within Central Committee. null = not a Central Committee member.
+  /// MEMBER and ADMINISTRATOR are peers for oversight; only ADMINISTRATOR may create committees / set leadership.
+  centralRole    CentralCommitteeRole? @map("central_role")
   createdAt      DateTime @default(now()) @map("created_at")
 
   chairsCommittees      Committee[]           @relation("CommitteeChair")
@@ -87,6 +90,11 @@ enum CommitteeRole {
   CHAIRPERSON
   SECRETARY
   MEMBER
+}
+
+enum CentralCommitteeRole {
+  MEMBER
+  ADMINISTRATOR
 }
 
 // Recommended join table: a person's role is scoped to one committee, so the

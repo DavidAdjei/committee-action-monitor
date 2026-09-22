@@ -17,6 +17,8 @@ export interface Me {
   department: string | null;
   isCentralCommittee: boolean;
   isAdmin: boolean;
+  /** Central Committee sub-role — all members equal for oversight; ADMINISTRATOR may create committees */
+  centralRole?: "MEMBER" | "ADMINISTRATOR" | null;
   memberships: {
     committeeId: number;
     role: CommitteeRole;

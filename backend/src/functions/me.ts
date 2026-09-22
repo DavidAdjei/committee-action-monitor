@@ -24,6 +24,9 @@ async function me(req: HttpRequest, _ctx: InvocationContext): Promise<HttpRespon
       department: user.department,
       isCentralCommittee: user.isCentralCommittee,
       isAdmin: user.isAdmin,
+      /** Central Committee sub-role: MEMBER | ADMINISTRATOR | null */
+      centralRole: (user as { centralRole?: "MEMBER" | "ADMINISTRATOR" | null }).centralRole
+        ?? (user.isAdmin ? "ADMINISTRATOR" : user.isCentralCommittee ? "MEMBER" : null),
       memberships: memberships.map((m) => ({
         ...m,
         committee: committees.find((c) => c.id === m.committeeId),

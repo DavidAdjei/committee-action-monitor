@@ -269,7 +269,7 @@ export function MeetingDetailPanel({
                   {detail.attendance.map((a) => (
                     <li
                       key={a.userId}
-                      className="flex items-center justify-between rounded-md border border-slate-100 px-2 py-1.5 dark:border-slate-800"
+                      className="flex items-center justify-between rounded-md border border-slate-100 dark:border-slate-700 px-2 py-1.5 dark:border-slate-800"
                     >
                       <span>
                         <b>{a.fullName}</b>
@@ -291,7 +291,7 @@ export function MeetingDetailPanel({
           {detail.actionPoints.length === 0 ? (
             <p className="text-sm text-slate-400">No action points raised from this meeting yet.</p>
           ) : (
-            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
+            <ul className="divide-y divide-slate-100 dark:divide-slate-700 rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-700">
               {detail.actionPoints.map((a) => (
                 <li key={a.id}>
                   <button

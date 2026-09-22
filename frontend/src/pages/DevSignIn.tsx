@@ -18,6 +18,7 @@ interface DevUser {
   department: string | null;
   isCentralCommittee: boolean;
   isAdmin: boolean;
+  centralRole?: "MEMBER" | "ADMINISTRATOR" | null;
   memberships?: DevUserMembership[];
 }
 
@@ -85,8 +86,9 @@ export default function DevSignIn() {
                 className="flex w-full items-start justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3.5 text-left transition hover:border-brand-300 hover:bg-brand-50 dark:border-slate-700 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
               >
                 <div className="min-w-0 flex-1">
-                  <b className="text-sm text-slate-900 dark:text-slate-100">{u.fullName}</b>
+                  <b className="text-sm text-slate-900 dark:text-slate-100 dark:text-slate-100">{u.fullName}</b>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {u.department ?? "—"}
                     {u.isAdmin
                       ? " · Central Committee Administrator"
                       : u.isCentralCommittee

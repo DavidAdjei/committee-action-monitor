@@ -277,7 +277,7 @@ export function CreateMinutesModal({
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Email / issued minutes layout
             </p>
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 dark:text-white">
               {meetingMeta?.title ?? "Meeting minutes"}
             </h3>
             <p className="text-xs text-slate-500">

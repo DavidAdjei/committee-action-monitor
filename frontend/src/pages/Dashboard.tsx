@@ -280,7 +280,7 @@ export default function Dashboard() {
                     <th className="pb-3 text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-800">
                   {filteredCommittees.map((c) => {
                     const hasOverdue = c.overdueActions > 0;
                     return (
@@ -458,7 +458,7 @@ export default function Dashboard() {
                 <th className="pb-3 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-800">
               {filteredUrgentActions.map((a: UrgentDashboardAction) => (
                 <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:hover:bg-slate-800/50 transition">
                   <td className="py-3">

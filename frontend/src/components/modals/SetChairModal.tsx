@@ -103,7 +103,7 @@ export function SetChairModal({
           )}
 
           {!selectedUser && candidates.length > 0 && (
-            <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-800">
+            <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-800 bg-white dark:bg-slate-800">
               {candidates.map((c) => (
                 <button
                   type="button"

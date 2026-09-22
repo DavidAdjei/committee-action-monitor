@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { buildMinutesDocxAttachment } from "./minutesDocumentService";
 import { Errors } from "../lib/http";
 
 export interface MailAttachment {
@@ -85,6 +86,7 @@ export async function buildMinutesIssuedMail(minutesId: number): Promise<Minutes
 
   const committee = minutes.meeting.committee;
   const attendanceAttachment = await buildAttendanceCsvAttachment(minutes.meetingId);
+  const minutesDocx = await buildMinutesDocxAttachment(minutesId);
 
   const attendanceRows = await prisma.meetingAttendance.findMany({
     where: { meetingId: minutes.meetingId },
@@ -104,64 +106,30 @@ export async function buildMinutesIssuedMail(minutesId: number): Promise<Minutes
   const subject = `Minutes issued: ${minutes.meeting.reference} — ${minutes.meeting.title}`;
 
   const textBody = [
-    `Minutes have been issued for ${minutes.meeting.title} (${minutes.meeting.reference}).`,
-    `Committee: ${committee.name}`,
-    "",
-    "1. Attendance",
-    attendanceRows.length
-      ? `See attached file: ${attendanceAttachment.filename}`
-      : "No attendance was recorded for this meeting.",
-    attendanceNames ? `Present: ${attendanceNames}` : "",
-    "",
-    "2. Discussion, decisions & resolutions",
-    minutes.discussion ?? "—",
-    "",
-    "3. Action points",
-    actionLines || "—",
-    "",
-    "The attendance register is attached as a CSV file.",
-  ]
-    .filter((l) => l !== undefined)
-    .join("\n");
+    `Dear colleague,`,
+    ``,
+    `Please find attached the minutes of the ${minutes.meeting.title} (${minutes.meeting.reference}) for ${committee.name}.`,
+    ``,
+    `A short summary of linked action points is below. The full minutes document follows the bank template and is attached as a Word file.`,
+    ``,
+    actionLines || "• (No action points linked)",
+    ``,
+    `Kind regards,`,
+    `Committee Action Monitor`,
+    `on behalf of ${committee.secretaryId ? "the Committee Secretary" : committee.name}`,
+  ].join("\n");
 
   const htmlBody = `
     <div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1e293b;line-height:1.5">
-      <h2 style="margin:0 0 4px 0">${escapeHtml(minutes.meeting.title)}</h2>
-      <p style="margin:0 0 16px 0;color:#64748b">
-        ${escapeHtml(minutes.meeting.reference)} · ${escapeHtml(committee.name)}
-      </p>
-      <h3 style="margin:16px 0 8px 0">1. Attendance</h3>
-      <p style="margin:0 0 8px 0">
-        ${
-          attendanceRows.length
-            ? `The attendance register is <strong>attached</strong> as <code>${escapeHtml(attendanceAttachment.filename)}</code>.`
-            : "No attendance was recorded for this meeting."
-        }
-      </p>
-      ${
-        attendanceRows.length
-          ? `<p style="margin:0 0 12px 0;color:#475569">${escapeHtml(attendanceNames)}</p>`
-          : ""
-      }
-      <h3 style="margin:16px 0 8px 0">2. Discussion, decisions &amp; resolutions</h3>
-      <pre style="white-space:pre-wrap;font-family:inherit;margin:0 0 12px 0">${escapeHtml(minutes.discussion ?? "—")}</pre>
-      <h3 style="margin:16px 0 8px 0">3. Action points</h3>
-      <ul style="margin:0;padding-left:18px">
-        ${
-          minutes.snapshots.length
-            ? minutes.snapshots
-                .map(
-                  (s) =>
-                    `<li><strong>${escapeHtml(s.actionPoint.referenceNo)}</strong> — ${escapeHtml(s.actionPoint.title)}
-                    <span style="color:#64748b">(${escapeHtml(s.actionPoint.owner.fullName)}, ${s.progressPercent}%, ${escapeHtml(s.actionStatus)})</span></li>`,
-                )
-                .join("")
-            : "<li>—</li>"
-        }
-      </ul>
-      <p style="margin-top:20px;font-size:12px;color:#94a3b8">
-        Sent by the Committee Action Monitor. Attendance is provided as a CSV attachment.
-      </p>
+      <p>Dear colleague,</p>
+      <p>Please find attached the <strong>minutes</strong> of
+        <strong>${escapeHtml(minutes.meeting.title)}</strong>
+        (${escapeHtml(minutes.meeting.reference)}) for
+        <strong>${escapeHtml(committee.name)}</strong>.</p>
+      <p>The Word document follows the bank minutes template. The attendance register is also attached as CSV.</p>
+      <h3 style="margin:16px 0 8px">Action points</h3>
+      <pre style="white-space:pre-wrap;font-family:inherit;margin:0">${escapeHtml(actionLines || "• (No action points linked)")}</pre>
+      <p style="margin-top:16px;color:#64748b;font-size:12px">Sent by the Committee Action Monitor on behalf of the Committee Secretary.</p>
     </div>
   `.trim();
 
@@ -179,7 +147,15 @@ export async function buildMinutesIssuedMail(minutesId: number): Promise<Minutes
     subject,
     htmlBody,
     textBody,
-    attachments: [attendanceAttachment],
+    attachments: [
+      {
+        filename: minutesDocx.filename,
+        contentType: minutesDocx.contentType,
+        content: minutesDocx.content,
+        encoding: minutesDocx.encoding,
+      },
+      attendanceAttachment,
+    ],
     recipientUserIds,
     meetingId: minutes.meetingId,
     minutesId: minutes.id,

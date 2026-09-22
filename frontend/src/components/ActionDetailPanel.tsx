@@ -309,7 +309,7 @@ export function ActionDetailPanel({
                   </div>
 
                   {submissionUpdate.note && (
-                    <p className="rounded border border-slate-100 bg-slate-50 p-2.5 text-sm italic text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    <p className="rounded border border-slate-100 dark:border-slate-700 bg-slate-50 p-2.5 text-sm italic text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       "{submissionUpdate.note}"
                     </p>
                   )}
@@ -474,7 +474,7 @@ export function ActionDetailPanel({
           </div>
 
           {showAuditSection && (
-            <div className="border-t border-slate-100 pt-4 dark:border-slate-700">
+            <div className="border-t border-slate-100 dark:border-slate-700 pt-4 dark:border-slate-700">
               <button
                 type="button"
                 onClick={loadAudit}

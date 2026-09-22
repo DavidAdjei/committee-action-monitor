@@ -16,6 +16,7 @@ export default {
         brand: {
           50: "#fffbeb",
           100: "#fef3c7",
+          400: "#FFC966",
           500: "#F4A623", // UMB primary gold
           600: "#E59400",
           700: "#D48400",

@@ -230,14 +230,30 @@ const CENTRAL_COMMITTEE_EMAILS = new Set(
   ].map((e) => e.toLowerCase()),
 );
 
-function collectUsers(): Map<string, { fullName: string; email: string; isCentralCommittee: boolean; isAdmin: boolean }> {
-  const map = new Map<string, { fullName: string; email: string; isCentralCommittee: boolean; isAdmin: boolean }>();
+type UserSeed = {
+  fullName: string;
+  email: string;
+  isCentralCommittee: boolean;
+  isAdmin: boolean;
+  centralRole: "MEMBER" | "ADMINISTRATOR" | null;
+};
+
+/** One Central Administrator; remaining secretariat are equal Central Members. */
+const CENTRAL_ADMIN_EMAIL = "stephen.ampadu@myumbbank.com";
+
+function collectUsers(): Map<string, UserSeed> {
+  const map = new Map<string, UserSeed>();
   const put = (fullName: string, email: string) => {
     const key = email.toLowerCase();
     if (!map.has(key)) {
-      map.set(key, { fullName, email, isCentralCommittee: false, isAdmin: false });
+      map.set(key, {
+        fullName,
+        email,
+        isCentralCommittee: false,
+        isAdmin: false,
+        centralRole: null,
+      });
     } else {
-      // Prefer the more complete display name if we see the user again
       map.get(key)!.fullName = fullName;
     }
   };
@@ -246,23 +262,18 @@ function collectUsers(): Map<string, { fullName: string; email: string; isCentra
   }
   for (const u of EXTRA_USERS) put(u.fullName, u.email);
 
-  // Official Central Committee membership (Committee Effectiveness Secretariat)
+  // Central Committee: all secretariat members are equal MEMBERs;
+  // one ADMINISTRATOR sub-role for committee creation / leadership tools.
   for (const [key, u] of map) {
     if (CENTRAL_COMMITTEE_EMAILS.has(key)) {
       u.isCentralCommittee = true;
-    }
-  }
-
-  // Bootstrap platform admin (can create committees). Not automatically Central unless listed above.
-  const justus = map.get("justus.awua@myumbbank.com");
-  if (justus) {
-    justus.isAdmin = true;
-  }
-
-  // Ensure every Central member exists even if a sheet email casing differed
-  for (const email of CENTRAL_COMMITTEE_EMAILS) {
-    if (!map.has(email)) {
-      // Should not happen for known rows; skip
+      if (key === CENTRAL_ADMIN_EMAIL) {
+        u.centralRole = "ADMINISTRATOR";
+        u.isAdmin = true;
+      } else {
+        u.centralRole = "MEMBER";
+        u.isAdmin = false;
+      }
     }
   }
 
@@ -283,12 +294,14 @@ async function main() {
         email: u.email,
         isCentralCommittee: u.isCentralCommittee,
         isAdmin: u.isAdmin,
+        centralRole: u.centralRole,
         active: true,
       },
       update: {
         fullName: u.fullName,
         isCentralCommittee: u.isCentralCommittee,
         isAdmin: u.isAdmin,
+        centralRole: u.centralRole,
         active: true,
       },
     });
@@ -355,22 +368,23 @@ async function main() {
     reference: string;
     title: string;
     startsAt: string;
+    endsAt?: string;
     venue: string;
   }[] = [
-    { code: "ALCO", reference: "MIN/ALCO/08/26", title: "August ALCO Meeting", startsAt: "2026-08-12T10:00:00Z", venue: "Treasury Conference Room" },
-    { code: "ALCO", reference: "MIN/ALCO/09/26", title: "September ALCO Meeting", startsAt: "2026-09-09T10:00:00Z", venue: "Treasury Conference Room" },
-    { code: "CISC", reference: "MIN/CISC/08/26", title: "August Cyber & InfoSec Meeting", startsAt: "2026-08-20T14:00:00Z", venue: "IS War Room" },
-    { code: "CISC", reference: "MIN/CISC/09/26", title: "September Cyber & InfoSec Meeting", startsAt: "2026-09-17T14:00:00Z", venue: "IS War Room" },
-    { code: "EXCO", reference: "MIN/EXCO/08/26", title: "August EXCO Meeting", startsAt: "2026-08-05T09:00:00Z", venue: "Board Room" },
-    { code: "EXCO", reference: "MIN/EXCO/09/26", title: "September EXCO Meeting", startsAt: "2026-09-02T09:00:00Z", venue: "Board Room" },
-    { code: "ICT", reference: "MIN/ICT/08/26", title: "August ICT Steering Meeting", startsAt: "2026-08-18T11:00:00Z", venue: "ICT Project Room" },
-    { code: "ICT", reference: "MIN/ICT/09/26", title: "September ICT Steering Meeting", startsAt: "2026-09-15T11:00:00Z", venue: "ICT Project Room" },
-    { code: "MANCO", reference: "MIN/MANCO/08/26", title: "August MANCO Meeting", startsAt: "2026-08-07T09:30:00Z", venue: "Management Conference Room" },
-    { code: "MANCO", reference: "MIN/MANCO/09/26", title: "September MANCO Meeting", startsAt: "2026-09-04T09:30:00Z", venue: "Management Conference Room" },
-    { code: "MCC", reference: "MIN/MCC/Q2/26", title: "Q2 Management Credit Committee", startsAt: "2026-06-20T10:00:00Z", venue: "Credit Committee Room" },
-    { code: "MCC", reference: "MIN/MCC/Q3/26", title: "Q3 Management Credit Committee", startsAt: "2026-09-12T10:00:00Z", venue: "Credit Committee Room" },
-    { code: "MRC", reference: "MIN/MRC/08/26", title: "August Risk Committee Meeting", startsAt: "2026-08-14T10:00:00Z", venue: "Risk Committee Room" },
-    { code: "MRC", reference: "MIN/MRC/09/26", title: "September Risk Committee Meeting", startsAt: "2026-09-11T10:00:00Z", venue: "Risk Committee Room" },
+    { code: "ALCO", reference: "MIN/ALCO/08/26", title: "August ALCO Meeting", startsAt: "2026-08-12T10:00:00Z", endsAt: "2026-08-12T12:00:00Z", venue: "Treasury Conference Room" },
+    { code: "ALCO", reference: "MIN/ALCO/09/26", title: "September ALCO Meeting", startsAt: "2026-09-09T10:00:00Z", endsAt: "2026-09-09T12:00:00Z", venue: "Treasury Conference Room" },
+    { code: "CISC", reference: "MIN/CISC/08/26", title: "August Cyber & InfoSec Meeting", startsAt: "2026-08-20T14:00:00Z", endsAt: "2026-08-20T16:00:00Z", venue: "IS War Room" },
+    { code: "CISC", reference: "MIN/CISC/09/26", title: "September Cyber & InfoSec Meeting", startsAt: "2026-09-17T14:00:00Z", endsAt: "2026-09-17T16:00:00Z", venue: "IS War Room" },
+    { code: "EXCO", reference: "MIN/EXCO/08/26", title: "August EXCO Meeting", startsAt: "2026-08-05T09:00:00Z", endsAt: "2026-08-05T11:00:00Z", venue: "Board Room" },
+    { code: "EXCO", reference: "MIN/EXCO/09/26", title: "September EXCO Meeting", startsAt: "2026-09-02T09:00:00Z", endsAt: "2026-09-02T11:00:00Z", venue: "Board Room" },
+    { code: "ICT", reference: "MIN/ICT/08/26", title: "August ICT Steering Meeting", startsAt: "2026-08-18T11:00:00Z", endsAt: "2026-08-18T13:00:00Z", venue: "ICT Project Room" },
+    { code: "ICT", reference: "MIN/ICT/09/26", title: "September ICT Steering Meeting", startsAt: "2026-09-15T11:00:00Z", endsAt: "2026-09-15T13:00:00Z", venue: "ICT Project Room" },
+    { code: "MANCO", reference: "MIN/MANCO/08/26", title: "August MANCO Meeting", startsAt: "2026-08-07T09:30:00Z", endsAt: "2026-08-07T11:30:00Z", venue: "Management Conference Room" },
+    { code: "MANCO", reference: "MIN/MANCO/09/26", title: "September MANCO Meeting", startsAt: "2026-09-04T09:30:00Z", endsAt: "2026-09-04T11:30:00Z", venue: "Management Conference Room" },
+    { code: "MCC", reference: "MIN/MCC/Q2/26", title: "Q2 Management Credit Committee", startsAt: "2026-06-20T10:00:00Z", endsAt: "2026-06-20T13:00:00Z", venue: "Credit Committee Room" },
+    { code: "MCC", reference: "MIN/MCC/Q3/26", title: "Q3 Management Credit Committee", startsAt: "2026-09-12T10:00:00Z", endsAt: "2026-09-12T13:00:00Z", venue: "Credit Committee Room" },
+    { code: "MRC", reference: "MIN/MRC/08/26", title: "August Risk Committee Meeting", startsAt: "2026-08-14T10:00:00Z", endsAt: "2026-08-14T12:00:00Z", venue: "Risk Committee Room" },
+    { code: "MRC", reference: "MIN/MRC/09/26", title: "September Risk Committee Meeting", startsAt: "2026-09-11T10:00:00Z", endsAt: "2026-09-11T12:00:00Z", venue: "Risk Committee Room" },
   ];
 
   const meetingsByRef = new Map<string, { id: number; committeeId: number; secretaryId: number; chairpersonId: number }>();
@@ -384,6 +398,7 @@ async function main() {
       update: {
         title: m.title,
         startsAt: new Date(m.startsAt),
+        endsAt: m.endsAt ? new Date(m.endsAt) : null,
         venue: m.venue,
       },
       create: {
@@ -391,6 +406,7 @@ async function main() {
         reference: m.reference,
         title: m.title,
         startsAt: new Date(m.startsAt),
+        endsAt: m.endsAt ? new Date(m.endsAt) : null,
         venue: m.venue,
         agenda: "Review outstanding action points, risk items and decisions from the previous meeting.",
         createdById: committee.secretaryId,
