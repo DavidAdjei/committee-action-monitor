@@ -101,6 +101,7 @@ export interface CommitteeDetail {
 }
 
 export interface ActionListItem {
+  commentCount?: number;
   id: number;
   referenceNo: string;
   title: string;
@@ -130,6 +131,13 @@ export interface ActionUpdateRecord {
   createdAt: string;
 }
 
+export interface ActionComment {
+  id: number;
+  body: string;
+  createdAt: string;
+  author: { id: number; fullName: string };
+}
+
 export interface ActionDetail {
   id: number;
   referenceNo: string;
@@ -152,10 +160,13 @@ export interface ActionDetail {
   verifiedAt: string | null;
   version: number;
   stakeholders: { userId: number; fullName: string; stakeholderType: string }[];
+  comments?: ActionComment[];
   updates: ActionUpdateRecord[];
 }
 
 export interface NotificationItem {
+  /** Human-readable line when available (e.g. who commented) */
+  summary?: string | null;
   id: number;
   notificationType: string;
   deliveryStatus: string;

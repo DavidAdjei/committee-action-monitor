@@ -109,7 +109,7 @@ export function SetChairModal({
                   type="button"
                   key={c.id}
                   onClick={() => setSelectedUser(c)}
-                  className="flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:hover:bg-slate-700 transition"
+                  className="flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50 transition"
                 >
                   <span className="font-medium text-slate-700 dark:text-slate-200">{c.fullName}</span>
                   <span className="text-slate-400">{c.department ?? c.email}</span>

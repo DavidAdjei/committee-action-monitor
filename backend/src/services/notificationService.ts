@@ -12,19 +12,38 @@ export function buildActionNotifications(params: {
   recipientIds: number[];
   notificationType: NotificationType;
   scheduledFor?: Date;
+  /** Optional prefix for one-off events (e.g. per-comment) so the same day can notify again */
+  idempotencyPrefix?: string;
 }): Prisma.NotificationCreateManyInput[] {
   const scheduledFor = params.scheduledFor ?? new Date();
   const uniqueRecipients = Array.from(new Set(params.recipientIds));
-  return uniqueRecipients.map((recipientId) => ({
-    actionPointId: params.actionPointId,
-    recipientId,
-    channel: "EMAIL" as const,
-    notificationType: params.notificationType,
-    idempotencyKey: `${params.actionPointId}:${recipientId}:${params.notificationType}:${scheduledFor
+  return uniqueRecipients.flatMap((recipientId) => {
+    const dayKey = `${params.actionPointId}:${recipientId}:${params.notificationType}:${scheduledFor
       .toISOString()
-      .slice(0, 10)}`,
-    scheduledFor,
-  }));
+      .slice(0, 10)}`;
+    const key = params.idempotencyPrefix
+      ? `${params.idempotencyPrefix}:${recipientId}`
+      : dayKey;
+    // Queue both EMAIL and IN_APP so portal + mail delivery workers can pick them up
+    return [
+      {
+        actionPointId: params.actionPointId,
+        recipientId,
+        channel: "EMAIL" as const,
+        notificationType: params.notificationType,
+        idempotencyKey: `email:${key}`,
+        scheduledFor,
+      },
+      {
+        actionPointId: params.actionPointId,
+        recipientId,
+        channel: "IN_APP" as const,
+        notificationType: params.notificationType,
+        idempotencyKey: `inapp:${key}`,
+        scheduledFor,
+      },
+    ];
+  });
 }
 
 /**

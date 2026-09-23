@@ -55,6 +55,36 @@ export async function requireViewCommittee(user: User, committeeId: number): Pro
   if (!allowed) throw Errors.forbidden("You do not have access to this committee.");
 }
 
+/**
+ * View an action point: committee members / Central Committee, OR the primary
+ * owner / any ACTION_OWNER stakeholder (owners may sit outside the committee).
+ */
+export async function canViewAction(
+  user: User,
+  action: { id: number; committeeId: number; ownerId: number },
+): Promise<boolean> {
+  if (await canViewCommittee(user, action.committeeId)) return true;
+  if (action.ownerId === user.id) return true;
+  const asOwner = await prisma.actionStakeholder.findFirst({
+    where: {
+      actionPointId: action.id,
+      userId: user.id,
+      stakeholderType: "ACTION_OWNER",
+    },
+  });
+  return asOwner !== null;
+}
+
+export async function requireViewAction(
+  user: User,
+  action: { id: number; committeeId: number; ownerId: number },
+): Promise<void> {
+  const allowed = await canViewAction(user, action);
+  if (!allowed) {
+    throw Errors.forbidden("You do not have access to this action point.");
+  }
+}
+
 type UserWithCentral = User & { centralRole?: "MEMBER" | "ADMINISTRATOR" | null };
 
 function centralRoleOf(user: User): "MEMBER" | "ADMINISTRATOR" | null {

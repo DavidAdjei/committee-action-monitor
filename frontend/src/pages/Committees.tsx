@@ -69,7 +69,7 @@ export default function Committees() {
                   <tr
                     key={c.id}
                     onClick={() => navigate(`/committees/${c.id}`)}
-                    className="cursor-pointer border-b border-slate-100 dark:border-slate-700 transition last:border-0 hover:bg-brand-50/40 dark:border-slate-800 dark:hover:bg-slate-800/60"
+                    className="cursor-pointer border-b border-slate-100 dark:border-slate-700 transition last:border-0 hover:bg-brand-50/40 dark:border-slate-800 dark:hover:bg-slate-800/50"
                   >
                     <td className="px-4 py-3">
                       <div className="font-semibold text-slate-800 dark:text-slate-100">{c.name}</div>

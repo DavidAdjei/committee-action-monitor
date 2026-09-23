@@ -169,6 +169,11 @@ export const endpoints = {
     );
   },
   actionDetail: (id: number) => api.get<ActionDetail>(`/actions/${id}`),
+  addActionComment: (actionId: number, body: string) =>
+    api.post<{ id: number; body: string; createdAt: string; author: { id: number; fullName: string } }>(
+      `/actions/${actionId}/comments`,
+      { body },
+    ),
   createAction: (
     committeeId: number,
     data: {

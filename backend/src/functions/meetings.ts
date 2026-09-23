@@ -253,6 +253,68 @@ async function listAttendanceHandler(req: HttpRequest, _ctx: InvocationContext):
   }
 }
 
+
+/** Calendar feed: meetings for committees the caller belongs to (optional date range). */
+async function listMyMeetings(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+
+    const fromRaw = req.query.get("from");
+    const toRaw = req.query.get("to");
+    const from = fromRaw ? new Date(fromRaw) : undefined;
+    const to = toRaw ? new Date(toRaw) : undefined;
+    if (from && Number.isNaN(from.getTime())) throw Errors.badRequest("Invalid from date.");
+    if (to && Number.isNaN(to.getTime())) throw Errors.badRequest("Invalid to date.");
+
+    const memberships = await prisma.committeeMembership.findMany({
+      where: { userId: user.id, active: true },
+      select: { committeeId: true },
+    });
+    const committeeIds = memberships.map((m) => m.committeeId);
+
+    if (committeeIds.length === 0) {
+      return ok([]);
+    }
+
+    const meetings = await prisma.meeting.findMany({
+      where: {
+        committeeId: { in: committeeIds },
+        ...(from || to
+          ? {
+              startsAt: {
+                ...(from ? { gte: from } : {}),
+                ...(to ? { lte: to } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { startsAt: "asc" },
+      include: {
+        committee: { select: { id: true, name: true, code: true } },
+        _count: { select: { attendance: true } },
+      },
+    });
+
+    return ok(
+      meetings.map((m) => ({
+        id: m.id,
+        reference: m.reference,
+        title: m.title,
+        startsAt: m.startsAt,
+        endsAt: m.endsAt,
+        venue: m.venue,
+        agenda: m.agenda,
+        teamsJoinUrl: m.teamsJoinUrl,
+        attendanceCount: m._count.attendance,
+        committee: m.committee,
+      })),
+    );
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
 app.http("meetings", {
   methods: ["GET", "POST", "OPTIONS"],
   authLevel: "anonymous",
@@ -286,4 +348,11 @@ app.http("meetingAttendanceList", {
   authLevel: "anonymous",
   route: "meetings/{meetingId}/attendance",
   handler: listAttendanceHandler,
+});
+
+app.http("myMeetings", {
+  methods: ["GET", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "me/meetings",
+  handler: listMyMeetings,
 });

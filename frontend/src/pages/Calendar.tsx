@@ -220,7 +220,7 @@ export default function CalendarPage() {
                           ? "border-brand-500 bg-brand-50 ring-2 ring-brand-500/30 dark:border-brand-500 dark:bg-brand-950/40"
                           : has
                             ? "border-brand-200 bg-white hover:border-brand-400 dark:border-brand-900 dark:bg-slate-800 dark:hover:border-brand-600"
-                            : "border-transparent bg-white hover:bg-slate-50 dark:bg-slate-800/60 dark:hover:bg-slate-800",
+                            : "border-transparent bg-white hover:bg-slate-50 dark:bg-slate-800/60 dark:hover:bg-slate-800/50",
                         isToday && !isSelected ? "ring-1 ring-brand-400/50" : "",
                       ].join(" ")}
                     >

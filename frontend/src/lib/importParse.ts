@@ -1,3 +1,4 @@
+import type { MappedActionRow } from "./docxTables";
 /**
  * Heuristic parsers for UMB-style minutes & action-tracker Word/CSV exports.
  */
@@ -206,4 +207,26 @@ export function matchOwnerId(
     if (hit) return hit.id;
   }
   return null;
+}
+
+/** Convert structured DOCX/XLSX table rows into action drafts. */
+export function parseActionsFromMappedTable(rows: MappedActionRow[]): ParsedActionDraft[] {
+  const seen = new Set<string>();
+  const out: ParsedActionDraft[] = [];
+  rows.forEach((r, i) => {
+    const title = r.title.replace(/^\*+|\*+$/g, "").trim();
+    if (title.length < 5) return;
+    const k = title.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({
+      key: `tbl-${r.no || i + 1}-${i}`,
+      title,
+      ownerHint: r.ownerHint,
+      deadline: parseDueDate(r.deadlineRaw || "Immediately"),
+      statusHint: r.statusHint,
+      include: true,
+    });
+  });
+  return out;
 }

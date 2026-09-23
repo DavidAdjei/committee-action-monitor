@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Download, Search } from "lucide-react";
+import { Download, MessageSquare, Search } from "lucide-react";
 import { useFlash } from "@/state/toastContext";
 import { useAuth } from "@/state/authContext";
 import { endpoints } from "@/api/endpoints";
 import { StatusPill, DueBadge, ProgressBar, formatDate } from "@/components/StatusBits";
 import { ActionDetailPanel } from "@/components/ActionDetailPanel";
+import { ActionCommentsModal } from "@/components/modals/ActionCommentsModal";
 import { LoadingLogo } from "@/components/LoadingLogo";
 import type { ActionListItem, CommitteeSummary } from "@/types";
 
@@ -23,6 +24,12 @@ export default function ActionPoints() {
   const [committees, setCommittees] = useState<CommitteeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [openActionId, setOpenActionId] = useState<number | null>(null);
+  const [commentsFor, setCommentsFor] = useState<{
+    id: number;
+    referenceNo: string;
+    title: string;
+    mode: "view" | "add";
+  } | null>(null);
 
   useEffect(() => {
     if (isCentral) {
@@ -92,7 +99,7 @@ export default function ActionPoints() {
                 key={s}
                 onClick={() => setStatus(s)}
                 className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ${
-                  status === s ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-600 dark:bg-slate-700 dark:text-slate-200"
+                  status === s ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800/50 dark:bg-slate-700 dark:text-slate-200"
                 }`}
               >
                 {s}
@@ -133,7 +140,6 @@ export default function ActionPoints() {
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400 dark:border-slate-700">
-                  <th className="py-2 pr-3">Reference</th>
                   <th className="py-2 pr-3">Title</th>
                   <th className="py-2 pr-3">Committee</th>
                   <th className="py-2 pr-3">Owner</th>
@@ -141,6 +147,7 @@ export default function ActionPoints() {
                   <th className="py-2 pr-3">Deadline</th>
                   <th className="py-2 pr-3">Progress</th>
                   <th className="py-2">Status</th>
+                  <th className="py-2 pl-2">Comments</th>
                 </tr>
               </thead>
               <tbody>
@@ -148,9 +155,8 @@ export default function ActionPoints() {
                   <tr
                     key={a.id}
                     onClick={() => setOpenActionId(a.id)}
-                    className="cursor-pointer border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:border-slate-800 dark:hover:bg-slate-800/50"
+                    className="cursor-pointer border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 dark:border-slate-800"
                   >
-                    <td className="py-2.5 pr-3 font-medium text-slate-700 dark:text-slate-200">{a.referenceNo}</td>
                     <td className="py-2.5 pr-3">{a.title}</td>
                     <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{a.committee?.name ?? "—"}</td>
                     <td className="py-2.5 pr-3">{a.owner.fullName}</td>
@@ -165,6 +171,43 @@ export default function ActionPoints() {
                     </td>
                     <td className="py-2.5">
                       <StatusPill status={a.status} />
+                    </td>
+                    <td className="py-2.5 pl-2" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          className="btn px-2 py-1 text-[11px]"
+                          title="View comments"
+                          onClick={() =>
+                            setCommentsFor({
+                              id: a.id,
+                              referenceNo: a.referenceNo,
+                              title: a.title,
+                              mode: "view",
+                            })
+                          }
+                        >
+                          <MessageSquare className="h-3.5 w-3.5" />
+                          {(a.commentCount ?? 0) > 0 ? a.commentCount : "View"}
+                        </button>
+                        {isCentral && (
+                          <button
+                            type="button"
+                            className="btn-primary px-2 py-1 text-[11px]"
+                            title="Add comment"
+                            onClick={() =>
+                              setCommentsFor({
+                                id: a.id,
+                                referenceNo: a.referenceNo,
+                                title: a.title,
+                                mode: "add",
+                              })
+                            }
+                          >
+                            Add
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -184,6 +227,16 @@ export default function ActionPoints() {
 
       {openActionId && (
         <ActionDetailPanel actionId={openActionId} onClose={() => setOpenActionId(null)} onChanged={load} />
+      )}
+      {commentsFor && (
+        <ActionCommentsModal
+          actionId={commentsFor.id}
+          referenceNo={commentsFor.referenceNo}
+          title={commentsFor.title}
+          mode={commentsFor.mode}
+          onClose={() => setCommentsFor(null)}
+          onChanged={load}
+        />
       )}
     </div>
   );

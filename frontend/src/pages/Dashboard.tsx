@@ -284,7 +284,7 @@ export default function Dashboard() {
                   {filteredCommittees.map((c) => {
                     const hasOverdue = c.overdueActions > 0;
                     return (
-                      <tr key={c.committeeId} className="hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:hover:bg-slate-800/60 transition">
+                      <tr key={c.committeeId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
                         <td className="py-3 font-medium text-slate-800 dark:text-slate-200">
                           <div>
                             <span className="font-semibold text-ink dark:text-white">{c.committeeName}</span>
@@ -435,7 +435,7 @@ export default function Dashboard() {
                 className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
                   urgentFilter === f.key
                     ? "bg-brand-500 text-white shadow-sm"
-                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 dark:hover:bg-slate-700"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800/50"
                 }`}
               >
                 {f.label}
@@ -460,7 +460,7 @@ export default function Dashboard() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-800">
               {filteredUrgentActions.map((a: UrgentDashboardAction) => (
-                <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:hover:bg-slate-800/50 transition">
+                <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
                   <td className="py-3">
                     <button
                       onClick={() => setSelectedActionId(a.id)}
@@ -504,7 +504,7 @@ export default function Dashboard() {
                   <td className="py-3 text-right">
                     <button
                       onClick={() => setSelectedActionId(a.id)}
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 dark:hover:bg-slate-800 transition"
+                      className="inline-flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition"
                     >
                       Inspect <ArrowUpRight className="h-3 w-3" />
                     </button>

@@ -58,9 +58,7 @@ export default function App() {
         path="/calendar"
         element={
           <RequireAuth>
-            <Layout>
-              <CalendarPage />
-            </Layout>
+            <CalendarPage />
           </RequireAuth>
         }
       />

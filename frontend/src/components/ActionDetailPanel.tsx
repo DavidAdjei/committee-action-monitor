@@ -5,8 +5,10 @@ import {
   ExternalLink,
   FileText,
   Loader2,
+  MessageSquare,
   Paperclip,
   ScrollText,
+  Send,
   XCircle,
 } from "lucide-react";
 import { Modal, ModalActions } from "@/components/Modal";
@@ -51,6 +53,8 @@ export function ActionDetailPanel({
 }) {
   const { me } = useAuth();
   const flash = useFlash();
+  const [commentBody, setCommentBody] = useState("");
+  const [commentBusy, setCommentBusy] = useState(false);
   const [detail, setDetail] = useState<ActionDetail | null>(null);
   const [showUpdate, setShowUpdate] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -72,6 +76,23 @@ export function ActionDetailPanel({
   useEffect(() => {
     load();
   }, [actionId]);
+
+  
+  const submitComment = async () => {
+    if (!detail || !commentBody.trim()) return;
+    setCommentBusy(true);
+    try {
+      await endpoints.addActionComment(detail.id, commentBody.trim());
+      setCommentBody("");
+      flash("Comment sent to the secretary and action owner(s)");
+      const d = await endpoints.actionDetail(detail.id);
+      setDetail(d);
+    } catch (err: unknown) {
+      flash(err instanceof ApiClientError ? err.message : "Could not post comment.", "error");
+    } finally {
+      setCommentBusy(false);
+    }
+  };
 
   if (!detail) return null;
 
@@ -309,7 +330,7 @@ export function ActionDetailPanel({
                   </div>
 
                   {submissionUpdate.note && (
-                    <p className="rounded border border-slate-100 dark:border-slate-700 bg-slate-50 p-2.5 text-sm italic text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    <p className="rounded border border-slate-100 dark:border-slate-700 bg-slate-50 p-2.5 text-sm italic text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                       "{submissionUpdate.note}"
                     </p>
                   )}
@@ -474,11 +495,11 @@ export function ActionDetailPanel({
           </div>
 
           {showAuditSection && (
-            <div className="border-t border-slate-100 dark:border-slate-700 pt-4 dark:border-slate-700">
+            <div className="border-t border-slate-100 dark:border-slate-700 pt-4">
               <button
                 type="button"
                 onClick={loadAudit}
-                className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:text-brand-700 dark:text-slate-200"
+                className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:text-brand-700"
               >
                 <ScrollText className="h-4 w-4" />
                 {showAudit ? "Hide audit trail" : "Show audit trail"}
@@ -544,7 +565,59 @@ export function ActionDetailPanel({
           )}
         </div>
 
-        <ModalActions>
+        
+      {/* Central Committee comments */}
+      <section className="space-y-3">
+        <h3 className="flex items-center gap-2 text-sm font-bold text-slate-800 dark:text-slate-100">
+          <MessageSquare className="h-4 w-4 text-brand-600" />
+          Central Committee comments
+        </h3>
+        <div className="space-y-2">
+          {(detail.comments ?? []).length === 0 && (
+            <p className="text-sm text-slate-400">No comments yet.</p>
+          )}
+          {(detail.comments ?? []).map((c) => (
+            <div
+              key={c.id}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/40"
+            >
+              <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span className="font-semibold text-slate-700 dark:text-slate-200">{c.author.fullName}</span>
+                <span>·</span>
+                <span>{formatDate(c.createdAt)}</span>
+              </div>
+              <p className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">{c.body}</p>
+            </div>
+          ))}
+        </div>
+        {me?.isCentralCommittee && (
+          <div className="space-y-2 rounded-lg border border-dashed border-brand-300 bg-brand-50/40 p-3 dark:border-brand-800 dark:bg-brand-950/20">
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              Your comment is visible on the portal and emailed to the committee secretary and action owner(s).
+            </p>
+            <textarea
+              className="field-input min-h-[80px]"
+              placeholder="Write an oversight comment…"
+              value={commentBody}
+              onChange={(e) => setCommentBody(e.target.value)}
+              maxLength={4000}
+            />
+            <div className="flex justify-end">
+              <button
+                type="button"
+                className="btn-primary text-xs"
+                disabled={commentBusy || !commentBody.trim()}
+                onClick={() => void submitComment()}
+              >
+                <Send className="h-3.5 w-3.5" />
+                {commentBusy ? "Sending…" : "Post comment"}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      <ModalActions>
           <button className="btn" onClick={onClose}>
             Close
           </button>
@@ -615,15 +688,15 @@ export function ActionDetailPanel({
             <p className="text-xs text-slate-400">
               Only Chairperson/Secretary may change these fields. Progress updates remain with the action owner.
             </p>
-            <ModalActions>
-              <button type="button" className="btn" onClick={() => setShowEdit(false)}>
-                Cancel
-              </button>
-              <button type="button" className="btn-primary" disabled={editBusy} onClick={handleEditSave}>
-                {editBusy ? "Saving…" : "Save changes"}
-              </button>
-            </ModalActions>
           </div>
+          <ModalActions>
+            <button type="button" className="btn" onClick={() => setShowEdit(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn-primary" disabled={editBusy} onClick={handleEditSave}>
+              {editBusy ? "Saving…" : "Save changes"}
+            </button>
+          </ModalActions>
         </Modal>
       )}
 
@@ -633,12 +706,12 @@ export function ActionDetailPanel({
           subtitle={`${detail.referenceNo} · Formal reopen of a closed action`}
           onClose={() => setShowReopen(false)}
         >
-          <div className="space-y-4">
+          <div className="space-y-3">
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              This returns the action to <b>In progress</b> and notifies stakeholders. Provide the governance reason.
+              Reopening moves this action out of a terminal status so the owner can continue work. Please provide a reason.
             </p>
             <label className="field-label">
-              Reason for reopening
+              Reason
               <textarea
                 className="field-input min-h-[80px]"
                 value={reopenNote}
@@ -646,15 +719,15 @@ export function ActionDetailPanel({
                 placeholder="e.g. Additional evidence required after audit review"
               />
             </label>
-            <ModalActions>
-              <button type="button" className="btn" onClick={() => setShowReopen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="btn-primary" disabled={reopening} onClick={handleReopen}>
-                {reopening ? "Reopening…" : "Confirm reopen"}
-              </button>
-            </ModalActions>
           </div>
+          <ModalActions>
+            <button type="button" className="btn" onClick={() => setShowReopen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn-primary" disabled={reopening} onClick={handleReopen}>
+              {reopening ? "Reopening…" : "Confirm reopen"}
+            </button>
+          </ModalActions>
         </Modal>
       )}
     </>

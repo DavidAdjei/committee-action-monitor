@@ -173,7 +173,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
-              className="mr-1 rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 md:hidden dark:text-slate-300 dark:hover:bg-slate-800"
+              className="mr-1 rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800/50 md:hidden dark:text-slate-300"
               onClick={() => setMobileNavOpen(true)}
               aria-label="Open menu"
             >
@@ -188,7 +188,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <button
               onClick={toggleTheme}
                 aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 dark:hover:bg-slate-800 transition text-slate-600 dark:text-slate-300"
+              className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/50 transition text-slate-600 dark:text-slate-300"
               title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
             >
               {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}

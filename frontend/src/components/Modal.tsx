@@ -88,7 +88,7 @@ export function Modal({
 
 export function ModalActions({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-6 flex flex-col-reverse gap-2 border-t border-slate-100 dark:border-slate-700 pt-4 sm:flex-row sm:justify-end dark:border-slate-700">
+    <div className="mt-6 flex flex-col-reverse gap-2 border-t border-slate-100 dark:border-slate-700 pt-4 sm:flex-row sm:justify-end">
       {children}
     </div>
   );

@@ -3,7 +3,7 @@ import { FileUp, Upload } from "lucide-react";
 import { Modal, ModalActions } from "@/components/Modal";
 import { endpoints } from "@/api/endpoints";
 import { ApiClientError } from "@/api/client";
-import { extractTextFromFile } from "@/lib/docxText";
+import { extractTextFromFile, parseDocxImport } from "@/lib/docxText";
 import {
   matchOwnerId,
   parseImportDocument,
@@ -78,6 +78,11 @@ export function ImportDocumentModal({
         if (actionsList.length === 0) {
           warn.push("No action rows detected in the spreadsheet. Check that the sheet has Action/Owner/Due columns.");
         }
+      } else if (lower.endsWith(".docx")) {
+        const parsed = await parseDocxImport(file, mode);
+        discussionText = parsed.discussion;
+        actionsList = parsed.actions;
+        warn = parsed.warnings;
       } else {
         const textContent = await extractTextFromFile(file);
         const parsed = parseImportDocument(textContent, mode);

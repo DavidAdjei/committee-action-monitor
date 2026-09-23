@@ -1,9 +1,10 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
-import { requireViewCommittee, requireCommitteeOfficer } from "../lib/authorize";
+import { requireViewCommittee, requireCommitteeOfficer, requireViewAction } from "../lib/authorize";
 import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
 import { updateActionMetadata, deleteActionPoint } from "../services/actionService";
+import { addActionComment, listActionComments } from "../services/actionCommentService";
 import { recordDenied } from "../services/auditService";
 
 async function getActionDetail(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
@@ -21,6 +22,10 @@ async function getActionDetail(req: HttpRequest, _ctx: InvocationContext): Promi
         createdBy: true,
         verifiedBy: true,
         stakeholders: { include: { user: true } },
+        comments: {
+          orderBy: { createdAt: "asc" },
+          include: { author: { select: { id: true, fullName: true, email: true } } },
+        },
         updates: {
           orderBy: { createdAt: "desc" },
           include: { author: true, evidenceFiles: true },
@@ -29,7 +34,7 @@ async function getActionDetail(req: HttpRequest, _ctx: InvocationContext): Promi
     });
     if (!action) throw Errors.notFound("Action point");
 
-    await requireViewCommittee(user, action.committeeId);
+    await requireViewAction(user, action);
 
     return ok({
       id: action.id,
@@ -57,6 +62,14 @@ async function getActionDetail(req: HttpRequest, _ctx: InvocationContext): Promi
         fullName: s.user.fullName,
         stakeholderType: s.stakeholderType,
       })),
+      comments: (action as any).comments
+        ? (action as any).comments.map((c: any) => ({
+            id: c.id,
+            body: c.body,
+            createdAt: c.createdAt,
+            author: { id: c.author.id, fullName: c.author.fullName },
+          }))
+        : [],
       updates: action.updates.map((u) => ({
         id: u.id,
         author: { id: u.author.id, fullName: u.author.fullName },
@@ -183,9 +196,46 @@ async function handleActionById(req: HttpRequest, ctx: InvocationContext): Promi
   return errorResponse(Errors.badRequest("Method not allowed."));
 }
 
+
+async function addCommentHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const actionId = Number(req.params.id);
+    if (!Number.isInteger(actionId)) throw Errors.badRequest("Invalid action id.");
+    const body = (await req.json()) as { body?: string };
+    const comment = await addActionComment({
+      actionPointId: actionId,
+      author: user,
+      body: body.body ?? "",
+    });
+    return ok(
+      {
+        id: comment.id,
+        body: comment.body,
+        createdAt: comment.createdAt,
+        author: {
+          id: comment.author.id,
+          fullName: comment.author.fullName,
+        },
+      },
+      201,
+    );
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
 app.http("actionDetail", {
   methods: ["GET", "PATCH", "DELETE", "OPTIONS"],
   authLevel: "anonymous",
   route: "actions/{id}",
   handler: handleActionById,
+});
+
+app.http("actionComments", {
+  methods: ["POST", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "actions/{id}/comments",
+  handler: addCommentHandler,
 });

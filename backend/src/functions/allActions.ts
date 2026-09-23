@@ -51,7 +51,7 @@ async function listAllActions(req: HttpRequest, _ctx: InvocationContext): Promis
       prisma.actionPoint.count({ where: where as any }),
       prisma.actionPoint.findMany({
         where: where as any,
-        include: { owner: true, committee: true, meeting: true },
+        include: { owner: true, committee: true, meeting: true, _count: { select: { comments: true } } },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -74,6 +74,7 @@ async function listAllActions(req: HttpRequest, _ctx: InvocationContext): Promis
         status: a.status,
         progress: a.progress,
         priority: a.priority,
+        commentCount: a._count?.comments ?? 0,
       })),
     });
   } catch (err) {

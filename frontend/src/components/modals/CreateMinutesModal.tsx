@@ -199,7 +199,7 @@ export function CreateMinutesModal({
           </div>
           <div className="max-h-52 space-y-1.5 overflow-y-auto">
             {actions.map((a) => (
-              <label key={a.id} className="flex items-center gap-2.5 rounded-md p-1.5 hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:hover:bg-slate-800">
+              <label key={a.id} className="flex items-center gap-2.5 rounded-md p-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                 <input type="checkbox" checked={selectedIds.has(a.id)} onChange={() => toggle(a.id)} />
                 <span className="flex-1 text-sm">
                   <b>

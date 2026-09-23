@@ -16,6 +16,7 @@ const TYPE_LABELS: Record<string, string> = {
   MINUTES_ISSUED: "Meeting minutes issued",
   MEETING_ACTIONS_REMINDER: "Action points needed for yesterday's meeting",
   MEETING_MINUTES_REMINDER: "Minutes needed — create and send to members",
+  ACTION_COMMENT: "Comment on an action",
 };
 
 function deliveryBadge(status: string) {
@@ -128,7 +129,7 @@ export default function Notifications() {
               type="button"
               onClick={() => setFilter(f)}
               className={`rounded-full px-3 py-1 text-xs font-medium ${
-                filter === f ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-600"
+                filter === f ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800/50"
               }`}
             >
               {f === "ALL" ? "All" : f === "UNREAD" ? "Unread" : "Failed delivery"}
@@ -161,7 +162,7 @@ export default function Notifications() {
               key={n.id}
               type="button"
               onClick={() => openItem(n)}
-              className={`flex w-full items-start gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-700/60 dark:hover:bg-slate-800/50 ${
+              className={`flex w-full items-start gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 ${
                 !n.readAt ? "bg-brand-50/40 dark:bg-brand-950/20" : ""
               }`}
             >
@@ -171,7 +172,7 @@ export default function Notifications() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <b className={`text-sm ${!n.readAt ? "text-slate-900 dark:text-slate-100 dark:text-slate-100" : "text-slate-600 dark:text-slate-300"}`}>
-                    {TYPE_LABELS[n.notificationType] ?? n.notificationType}
+                    {n.summary ?? TYPE_LABELS[n.notificationType] ?? n.notificationType}
                   </b>
                   <span className="shrink-0 text-xs text-slate-400">
                     {new Date(n.scheduledFor).toLocaleString()}

@@ -30,7 +30,7 @@ async function listActions(req: HttpRequest, _ctx: InvocationContext): Promise<H
             }
           : {}),
       },
-      include: { owner: true, meeting: true },
+      include: { owner: true, meeting: true, _count: { select: { comments: true } } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     });
 
@@ -69,6 +69,7 @@ function serializeAction(a: any) {
     priority: a.priority,
     status: a.status,
     progress: a.progress,
+    commentCount: a._count?.comments ?? 0,
     minutesReference: a.minutesReference,
   };
 }

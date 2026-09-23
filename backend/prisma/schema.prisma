@@ -47,6 +47,7 @@ model User {
   createdActions        ActionPoint[]         @relation("ActionCreatedBy")
   verifiedActions       ActionPoint[]         @relation("ActionVerifiedBy")
   actionUpdatesAuthored ActionUpdate[]
+  actionCommentsAuthored ActionComment[]
   stakeholderOf         ActionStakeholder[]
   notifications         Notification[]
   attendanceRecords   MeetingAttendance[]
@@ -273,6 +274,7 @@ model ActionPoint {
   verifiedBy   User?                   @relation("ActionVerifiedBy", fields: [verifiedById], references: [id])
   stakeholders ActionStakeholder[]
   updates      ActionUpdate[]
+  comments     ActionComment[]
   notifications Notification[]
   snapshots    MinuteActionSnapshot[]
   auditEvents  AuditEvent[]
@@ -322,6 +324,21 @@ model ActionUpdate {
   @@map("action_updates")
 }
 
+// Central Committee oversight comments on action points.
+model ActionComment {
+  id            Int      @id @default(autoincrement())
+  actionPointId Int      @map("action_point_id")
+  authorId      Int      @map("author_id")
+  body          String   @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  actionPoint ActionPoint @relation(fields: [actionPointId], references: [id], onDelete: Cascade)
+  author      User        @relation(fields: [authorId], references: [id])
+
+  @@index([actionPointId, createdAt], name: "ix_action_comments_action")
+  @@map("action_comments")
+}
+
 model EvidenceFile {
   id             Int      @id @default(autoincrement())
   actionUpdateId Int      @map("action_update_id")
@@ -362,6 +379,8 @@ enum NotificationType {
   MEETING_ACTIONS_REMINDER
   /// Secretary: meeting still has no minutes the day after the actions reminder
   MEETING_MINUTES_REMINDER
+  /// Central Committee comment on an action point
+  ACTION_COMMENT
 }
 
 enum DeliveryStatus {
