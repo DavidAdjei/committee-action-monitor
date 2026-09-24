@@ -11,6 +11,8 @@ export interface ImportActionDraft {
   ownerIds: number[];
   deadline?: string | Date;
   priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  status?: "OPEN" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE" | "PENDING_VERIFICATION" | "CANCELLED";
+  progress?: number;
 }
 
 export interface ImportMinutesInput {
@@ -154,6 +156,8 @@ export async function importMinutesWithActions(input: ImportMinutesInput) {
       dateRaised: new Date(),
       deadline,
       priority: draft.priority,
+      status: draft.status,
+      progress: draft.progress,
       createdById: input.createdById,
     });
 

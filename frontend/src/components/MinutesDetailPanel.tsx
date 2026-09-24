@@ -38,6 +38,14 @@ export function MinutesDetailPanel({
   const [documentUrl, setDocumentUrl] = useState("");
   const [attendanceList, setAttendanceList] = useState<{ fullName: string; method: string }[]>([]);
   const [showMailPreview, setShowMailPreview] = useState(false);
+  const [mailPreview, setMailPreview] = useState<{
+    subject: string;
+    htmlBody: string;
+    textBody: string;
+    recipientCount: number;
+    attachments: { filename: string; contentType: string }[];
+  } | null>(null);
+  const [mailPreviewLoading, setMailPreviewLoading] = useState(false);
   const [showAttendance, setShowAttendance] = useState(false);
 
   const load = () =>
@@ -266,36 +274,68 @@ export function MinutesDetailPanel({
       <button
         type="button"
         className="mt-4 text-xs font-semibold text-brand-700 dark:text-brand-300 hover:underline"
-        onClick={() => setShowMailPreview((v) => !v)}
+        onClick={() => {
+          setShowMailPreview((v) => {
+            const next = !v;
+            if (next && !mailPreview) {
+              setMailPreviewLoading(true);
+              endpoints
+                .minutesMailPreview(minutesId)
+                .then((p) =>
+                  setMailPreview({
+                    subject: p.subject,
+                    htmlBody: p.htmlBody,
+                    textBody: p.textBody,
+                    recipientCount: p.recipientCount,
+                    attachments: p.attachments.map((a) => ({
+                      filename: a.filename,
+                      contentType: a.contentType,
+                    })),
+                  }),
+                )
+                .catch((err: unknown) =>
+                  flash(
+                    err instanceof ApiClientError ? err.message : "Could not load email preview.",
+                    "error",
+                  ),
+                )
+                .finally(() => setMailPreviewLoading(false));
+            }
+            return next;
+          });
+        }}
       >
         {showMailPreview ? "Hide" : "Show"} email layout preview
       </button>
       {showMailPreview && (
         <div className="mt-2 rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm dark:border-slate-600 dark:bg-slate-900">
-          <h3 className="font-bold">{detail.meeting.title}</h3>
-          <p className="text-xs text-slate-500">
-            {detail.meeting.reference} · {formatDate(detail.meeting.startsAt)}
-          </p>
-          <hr className="my-2 border-slate-200 dark:border-slate-700" />
-          <p className="font-semibold">1. Attendance</p>
-          <p className="mb-1 text-[11px] text-brand-700 dark:text-brand-300">
-            Email includes a short message with the Word minutes (bank template) and attendance CSV attached.
-          </p>
-          <ul className="mb-2 list-inside list-disc text-xs">
-            {attendanceList.map((a, i) => (
-              <li key={i}>{a.fullName}</li>
-            ))}
-          </ul>
-          <p className="font-semibold">2. Discussion, decisions & resolutions</p>
-          <p className="mb-2 whitespace-pre-wrap text-xs">{detail.discussion}</p>
-          <p className="font-semibold">3. Action points</p>
-          <ul className="list-inside list-disc text-xs">
-            {detail.snapshots.map((s) => (
-              <li key={s.actionPointId}>
-                {s.referenceNo} — {s.title} ({s.actionStatus}, {s.progressPercent}%)
-              </li>
-            ))}
-          </ul>
+          {mailPreviewLoading && (
+            <p className="flex items-center gap-2 text-xs text-slate-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading mail preview…
+            </p>
+          )}
+          {mailPreview && !mailPreviewLoading && (
+            <>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Subject · {mailPreview.recipientCount} recipient
+                {mailPreview.recipientCount === 1 ? "" : "s"}
+              </p>
+              <p className="mb-2 font-semibold text-slate-800 dark:text-slate-100">{mailPreview.subject}</p>
+              {mailPreview.attachments.length > 0 && (
+                <p className="mb-2 text-[11px] text-slate-500">
+                  Attachments:{" "}
+                  {mailPreview.attachments.map((a) => a.filename).join(", ")}
+                </p>
+              )}
+              <div
+                className="max-h-64 overflow-auto rounded border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950"
+                dangerouslySetInnerHTML={{ __html: mailPreview.htmlBody }}
+              />
+            </>
+          )}
+          {!mailPreview && !mailPreviewLoading && (
+            <p className="text-xs text-slate-500">Preview unavailable.</p>
+          )}
         </div>
       )}
 

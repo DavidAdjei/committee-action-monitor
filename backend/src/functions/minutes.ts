@@ -2,7 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/fu
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
 import { requireCommitteeOfficer, requireViewCommittee } from "../lib/authorize";
-import { ok, errorResponse, preflight, Errors } from "../lib/http";
+import { ok, errorResponse, preflight, Errors, corsHeaders } from "../lib/http";
 import {
   createDraftMinutes,
   issueMinutes,
@@ -215,6 +215,8 @@ async function importMinutesHandler(req: HttpRequest, _ctx: InvocationContext): 
         ownerIds: number[];
         deadline?: string;
         priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+        status?: "OPEN" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE" | "PENDING_VERIFICATION" | "CANCELLED";
+        progress?: number;
       }[];
     };
 
@@ -270,6 +272,7 @@ async function exportMinutesHandler(req: HttpRequest, _ctx: InvocationContext): 
         "Content-Type": doc.contentType,
         "Content-Disposition": `attachment; filename="${doc.filename}"`,
         "Cache-Control": "no-store",
+        ...corsHeaders(),
       },
       body: doc.buffer,
     };
@@ -318,4 +321,11 @@ app.http("exportMinutes", {
   authLevel: "anonymous",
   route: "minutes/{minutesId}/export",
   handler: exportMinutesHandler,
+});
+
+app.http("minutesMailPreview", {
+  methods: ["GET", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "minutes/{minutesId}/mail-preview",
+  handler: minutesMailPreviewHandler,
 });

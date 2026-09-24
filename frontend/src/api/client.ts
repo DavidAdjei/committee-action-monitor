@@ -1,4 +1,5 @@
 import { useLoadingStore } from "@/state/loadingStore";
+import { getAccessToken } from "@/auth/token";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const DEV_USER_STORAGE_KEY = "cam.devUserId";
@@ -34,9 +35,11 @@ export class ApiClientError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const devUserId = getDevUserId();
+  const bearer = getAccessToken();
   const headers: Record<string, string> = {
     ...(init?.body && !(init.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
     ...(devUserId ? { "x-dev-user-id": String(devUserId) } : {}),
+    ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
     ...((init?.headers as Record<string, string>) ?? {}),
   };
 
@@ -82,8 +85,10 @@ export const api = {
     request<T>(path, { method: "DELETE", body: data !== undefined ? JSON.stringify(data) : undefined }),
   download: async (path: string, fallbackFilename = "download"): Promise<void> => {
     const devUserId = getDevUserId();
+    const bearer = getAccessToken();
     const headers: Record<string, string> = {
       ...(devUserId ? { "x-dev-user-id": String(devUserId) } : {}),
+      ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
     };
 
     useLoadingStore.getState().startRequest();

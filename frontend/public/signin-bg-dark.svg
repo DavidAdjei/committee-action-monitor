@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="dgSky" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#071525"/>
+      <stop offset="45%" stop-color="#0B1F3A"/>
+      <stop offset="100%" stop-color="#123A5C"/>
+    </linearGradient>
+    <linearGradient id="dgWood" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#5C4030"/>
+      <stop offset="100%" stop-color="#3D2A1F"/>
+    </linearGradient>
+    <linearGradient id="dgGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F5B942"/>
+      <stop offset="100%" stop-color="#C9922A"/>
+    </linearGradient>
+    <linearGradient id="dgPaper" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E293B"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+    <radialGradient id="dgGlow" cx="50%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#1B4F8A" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#071525" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="dgShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#dgSky)"/>
+  <rect width="1920" height="1080" fill="url(#dgGlow)"/>
+
+  <!-- Floor -->
+  <path d="M0 640 L960 580 L1920 640 L1920 1080 L0 1080 Z" fill="#0A1628"/>
+  <path d="M0 640 L960 580 L1920 640" fill="none" stroke="#1E3A5F" stroke-width="2" opacity="0.5"/>
+
+  <!-- Tall windows with night city glow -->
+  <g>
+    <rect x="160" y="60" width="260" height="400" rx="6" fill="#0A1A2E" stroke="#1E3A5F" stroke-width="2"/>
+    <rect x="170" y="70" width="110" height="180" fill="#0E2A45"/>
+    <rect x="290" y="70" width="120" height="180" fill="#0C243C"/>
+    <rect x="170" y="260" width="110" height="180" fill="#0C243C"/>
+    <rect x="290" y="260" width="120" height="180" fill="#0E2A45"/>
+    <!-- window city sparkles -->
+    <g fill="#F5B942" opacity="0.35">
+      <rect x="190" y="100" width="8" height="8" rx="1"/>
+      <rect x="220" y="130" width="8" height="8" rx="1"/>
+      <rect x="310" y="110" width="8" height="8" rx="1"/>
+      <rect x="340" y="160" width="8" height="8" rx="1"/>
+      <rect x="200" y="300" width="8" height="8" rx="1"/>
+      <rect x="330" y="320" width="8" height="8" rx="1"/>
+    </g>
+
+    <rect x="1500" y="60" width="260" height="400" rx="6" fill="#0A1A2E" stroke="#1E3A5F" stroke-width="2"/>
+    <rect x="1510" y="70" width="110" height="180" fill="#0E2A45"/>
+    <rect x="1630" y="70" width="120" height="180" fill="#0C243C"/>
+    <rect x="1510" y="260" width="110" height="180" fill="#0C243C"/>
+    <rect x="1630" y="260" width="120" height="180" fill="#0E2A45"/>
+    <g fill="#5BA3D9" opacity="0.3">
+      <rect x="1530" y="105" width="8" height="8" rx="1"/>
+      <rect x="1560" y="140" width="8" height="8" rx="1"/>
+      <rect x="1650" y="120" width="8" height="8" rx="1"/>
+      <rect x="1680" y="170" width="8" height="8" rx="1"/>
+    </g>
+  </g>
+
+  <!-- Conference table -->
+  <ellipse cx="960" cy="740" rx="640" ry="125" fill="#1A100C" opacity="0.5"/>
+  <ellipse cx="960" cy="720" rx="620" ry="115" fill="url(#dgWood)" filter="url(#dgShadow)"/>
+  <ellipse cx="960" cy="708" rx="590" ry="95" fill="#6B4A35"/>
+  <ellipse cx="960" cy="702" rx="500" ry="14" fill="#F5B942" opacity="0.12"/>
+
+  <!-- Documents -->
+  <g filter="url(#dgShadow)">
+    <rect x="710" y="650" width="145" height="105" rx="3" fill="#1E293B" stroke="#334155" stroke-width="1" transform="rotate(-6 782 702)"/>
+    <rect x="880" y="640" width="155" height="115" rx="3" fill="#1E293B" stroke="#334155" stroke-width="1" transform="rotate(4 957 697)"/>
+    <rect x="1060" y="655" width="135" height="100" rx="3" fill="#1E293B" stroke="#334155" stroke-width="1" transform="rotate(-3 1127 705)"/>
+  </g>
+  <g stroke="#F5B942" stroke-width="1.5" opacity="0.35">
+    <line x1="730" y1="675" x2="830" y2="665"/>
+    <line x1="735" y1="695" x2="825" y2="685"/>
+    <line x1="900" y1="675" x2="1010" y2="682"/>
+    <line x1="905" y1="698" x2="1005" y2="705"/>
+    <line x1="1080" y1="680" x2="1175" y2="672"/>
+    <line x1="1085" y1="700" x2="1170" y2="692"/>
+  </g>
+
+  <!-- Screens -->
+  <g filter="url(#dgShadow)">
+    <rect x="560" y="665" width="105" height="68" rx="4" fill="#0F172A" stroke="#334155"/>
+    <rect x="568" y="672" width="89" height="50" rx="2" fill="#0EA5E9" opacity="0.35"/>
+    <rect x="1255" y="660" width="105" height="68" rx="4" fill="#0F172A" stroke="#334155"/>
+    <rect x="1263" y="667" width="89" height="50" rx="2" fill="#38BDF8" opacity="0.3"/>
+  </g>
+
+  <!-- Chairs -->
+  <g fill="#1E293B" stroke="#334155" stroke-width="1" opacity="0.85">
+    <rect x="480" y="790" width="75" height="52" rx="8"/>
+    <rect x="610" y="810" width="75" height="52" rx="8"/>
+    <rect x="1235" y="810" width="75" height="52" rx="8"/>
+    <rect x="1365" y="790" width="75" height="52" rx="8"/>
+    <rect x="890" y="830" width="140" height="58" rx="8"/>
+  </g>
+
+  <!-- Agenda board with gold accent -->
+  <g filter="url(#dgShadow)">
+    <rect x="810" y="110" width="300" height="220" rx="8" fill="#0F172A" stroke="#1E3A5F" stroke-width="2"/>
+    <rect x="810" y="110" width="300" height="40" rx="8" fill="url(#dgGold)"/>
+    <text x="960" y="137" text-anchor="middle" fill="#0B1F3A" font-family="system-ui,sans-serif" font-size="17" font-weight="700">Committee Agenda</text>
+    <line x1="845" y1="180" x2="1075" y2="180" stroke="#334155" stroke-width="3"/>
+    <line x1="845" y1="215" x2="1045" y2="215" stroke="#334155" stroke-width="3"/>
+    <line x1="845" y1="250" x2="1065" y2="250" stroke="#334155" stroke-width="3"/>
+    <line x1="845" y1="285" x2="1010" y2="285" stroke="#334155" stroke-width="3"/>
+    <!-- gold check marks -->
+    <circle cx="860" cy="180" r="5" fill="#F5B942" opacity="0.7"/>
+    <circle cx="860" cy="215" r="5" fill="#F5B942" opacity="0.5"/>
+    <circle cx="860" cy="250" r="5" fill="#F5B942" opacity="0.4"/>
+  </g>
+
+  <!-- Ambient gold dust -->
+  <g fill="#F5B942" opacity="0.2">
+    <circle cx="400" cy="500" r="2"/>
+    <circle cx="1500" cy="480" r="2"/>
+    <circle cx="200" cy="900" r="1.5"/>
+    <circle cx="1700" cy="850" r="1.5"/>
+  </g>
+</svg>

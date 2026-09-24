@@ -65,15 +65,15 @@ export function canManageMembers(me: Me | null | undefined, committeeId: number)
 }
 
 export function canCreateMeeting(me: Me | null | undefined, committeeId: number): boolean {
-  return isCommitteeOfficer(me, committeeId);
+  return isAdmin(me) || isCommitteeOfficer(me, committeeId);
 }
 
 export function canCreateMinutes(me: Me | null | undefined, committeeId: number): boolean {
-  return isCommitteeOfficer(me, committeeId);
+  return isAdmin(me) || isCommitteeOfficer(me, committeeId);
 }
 
 export function canCreateAction(me: Me | null | undefined, committeeId: number): boolean {
-  return isCommitteeOfficer(me, committeeId);
+  return isAdmin(me) || isCommitteeOfficer(me, committeeId);
 }
 
 /**
@@ -93,6 +93,8 @@ export function canUpdateAction(
 ): boolean {
   if (!me) return false;
   if (["COMPLETED", "CANCELLED"].includes(opts.status)) return false;
+  // Platform admin may update any action
+  if (me.isAdmin) return true;
   if (opts.ownerIds && opts.ownerIds.length > 0) {
     return opts.ownerIds.includes(me.id);
   }
@@ -116,6 +118,7 @@ export function canVerifyAction(
 ): boolean {
   if (!me) return false;
   if (opts.status !== "PENDING_VERIFICATION") return false;
+  if (me.isAdmin) return true;
   if (isCommitteeOfficer(me, opts.committeeId)) return true;
   if (opts.isOfficerStakeholder) return true;
   return false;

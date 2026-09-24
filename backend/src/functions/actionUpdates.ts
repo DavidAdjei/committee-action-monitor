@@ -44,10 +44,10 @@ async function createUpdateHandler(req: HttpRequest, _ctx: InvocationContext): P
       throw Errors.badRequest("status, progress and note are required.");
     }
     if (body.status === "CANCELLED") {
-      if (!officer) {
+      if (!officer && !user.isAdmin) {
         throw Errors.forbidden("Only the committee's Chairperson or Secretary may cancel an action.");
       }
-    } else if (!isOwner) {
+    } else if (!isOwner && !user.isAdmin) {
       throw Errors.forbidden("Only the assigned action owner may update progress on this action.");
     }
 

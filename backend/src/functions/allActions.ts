@@ -44,7 +44,14 @@ async function listAllActions(req: HttpRequest, _ctx: InvocationContext): Promis
       if (committeeId) where.committeeId = committeeId;
     } else {
       // Personal worklist: actions assigned to this user as owner
-      where.ownerId = user.id;
+      where.OR = [
+        { ownerId: user.id },
+        {
+          stakeholders: {
+            some: { userId: user.id, stakeholderType: "ACTION_OWNER" },
+          },
+        },
+      ];
     }
 
     const [total, actions] = await Promise.all([

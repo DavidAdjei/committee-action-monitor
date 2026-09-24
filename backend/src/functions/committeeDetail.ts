@@ -32,8 +32,8 @@ async function committeeDetail(req: HttpRequest, _ctx: InvocationContext): Promi
       where: { userId: user.id, committeeId: id, active: true },
     });
     const myRole = myMembership?.role ?? null;
-    const canEdit = myRole === "CHAIRPERSON" || myRole === "SECRETARY";
-    const isCentralCommitteeViewOnly = Boolean(user.isCentralCommittee && !canEdit);
+    const canEdit = Boolean(user.isAdmin) || myRole === "CHAIRPERSON" || myRole === "SECRETARY";
+    const isCentralCommitteeViewOnly = Boolean(user.isCentralCommittee && !user.isAdmin && !canEdit);
     const officer = await isCommitteeOfficer(user.id, id);
     // Leadership changes & bank-wide governance: admin / central
     const canManageCommittee = Boolean(user.isAdmin || user.isCentralCommittee);

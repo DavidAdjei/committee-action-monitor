@@ -9,6 +9,9 @@ export type ParsedActionDraft = {
   ownerHint: string;
   deadline: string; // YYYY-MM-DD
   statusHint: string;
+  /** Canonical schema status derived from Status column */
+  status: "OPEN" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE" | "PENDING_VERIFICATION";
+  progress: number;
   include: boolean;
 };
 
@@ -52,6 +55,47 @@ function parseDueDate(raw: string, fallbackDays = 14): string {
   const d = new Date();
   d.setDate(d.getDate() + fallbackDays);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Map free-text Status column values to schema status + progress.
+ * Ongoing / Ongoing (50%) → IN_PROGRESS (+ optional %)
+ * Complete / Completed → COMPLETED (100%)
+ * Pending → OPEN (not started)
+ * Overdue → OVERDUE
+ */
+export function mapImportStatus(raw: string): {
+  status: ParsedActionDraft["status"];
+  progress: number;
+} {
+  const s = (raw ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!s) return { status: "OPEN", progress: 0 };
+
+  // Extract percentage if present e.g. Ongoing (50%), 50% complete
+  const pctMatch = s.match(/(\d{1,3})\s*%/);
+  const pct = pctMatch ? Math.min(100, Math.max(0, Number(pctMatch[1]))) : null;
+
+  if (/overdue/.test(s)) {
+    return { status: "OVERDUE", progress: pct ?? 0 };
+  }
+  if (/complete|completed|done|closed/.test(s)) {
+    return { status: "COMPLETED", progress: 100 };
+  }
+  if (/pending verification|awaiting verification/.test(s)) {
+    return { status: "PENDING_VERIFICATION", progress: pct ?? 100 };
+  }
+  if (/in progress|ongoing|in-progress|started|working/.test(s)) {
+    return { status: "IN_PROGRESS", progress: pct ?? 25 };
+  }
+  if (/pending|not started|to do|todo|open/.test(s)) {
+    return { status: "OPEN", progress: 0 };
+  }
+  // Default: treat unknown as open unless a % suggests work started
+  if (pct != null && pct > 0 && pct < 100) {
+    return { status: "IN_PROGRESS", progress: pct };
+  }
+  if (pct === 100) return { status: "COMPLETED", progress: 100 };
+  return { status: "OPEN", progress: 0 };
 }
 
 function looksLikeActionHeader(line: string): boolean {
@@ -134,12 +178,15 @@ export function parseActionsFromText(text: string): ParsedActionDraft[] {
     title = normalize(title).replace(/^\*+|\*+$/g, "");
     if (title.length < 12) continue;
 
+    const mapped = mapImportStatus(statusHint);
     actions.push({
       key: `a-${num[1]}-${actions.length}`,
       title,
       ownerHint: normalize(ownerHint),
       deadline: parseDueDate(deadlineRaw || "Immediately"),
       statusHint: normalize(statusHint),
+      status: mapped.status,
+      progress: mapped.progress,
       include: true,
     });
   }
@@ -187,26 +234,85 @@ export function parseImportDocument(text: string, mode: "minutes_and_actions" | 
   return { kind: mode, discussion, actions, warnings };
 }
 
+/** Split an Owner cell into individual name tokens. */
+export function splitOwnerNames(ownerHint: string): string[] {
+  if (!ownerHint?.trim()) return [];
+  return ownerHint
+    .split(/[,;/|&\n\r]+|\band\b/i)
+    .map((s) => s.replace(/^\s*[-•*]+\s*/, "").trim())
+    .filter((s) => s.length > 1);
+}
+
+function scoreNameMatch(candidate: string, fullName: string): number {
+  const c = candidate.toLowerCase().replace(/\s+/g, " ").trim();
+  const n = fullName.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!c || !n) return 0;
+  if (n === c) return 100;
+  if (n.includes(c) || c.includes(n)) return 80;
+  const cParts = c.split(" ").filter((p) => p.length > 1);
+  const nParts = n.split(" ");
+  let hits = 0;
+  for (const p of cParts) {
+    if (nParts.some((np) => np === p || np.startsWith(p) || p.startsWith(np))) hits += 1;
+  }
+  if (hits === 0) return 0;
+  if (hits >= 2 || (cParts.length === 1 && hits === 1 && cParts[0].length > 3)) {
+    return 40 + hits * 15;
+  }
+  return 20;
+}
+
+/** Best single-user match for one name token, or null. */
 export function matchOwnerId(
   ownerHint: string,
   directory: { id: number; fullName: string }[],
 ): number | null {
-  if (!ownerHint || directory.length === 0) return null;
-  const hint = ownerHint.toLowerCase();
-  // Exact
-  const exact = directory.find((u) => u.fullName.toLowerCase() === hint);
-  if (exact) return exact.id;
-  // First token of each slash-separated name
-  const tokens = hint.split(/[/&,]+/).map((t) => t.trim()).filter(Boolean);
-  for (const token of tokens) {
-    const hit = directory.find(
-      (u) =>
-        u.fullName.toLowerCase().includes(token) ||
-        token.split(/\s+/).some((p) => p.length > 2 && u.fullName.toLowerCase().includes(p)),
-    );
-    if (hit) return hit.id;
+  const result = matchOwnersFromHint(ownerHint, directory);
+  return result.matched[0]?.id ?? null;
+}
+
+export type OwnerMatchResult = {
+  /** Distinct users resolved from the Owner cell */
+  matched: { id: number; fullName: string }[];
+  /** Name fragments from the file that could not be matched */
+  unmatched: string[];
+};
+
+/**
+ * Map an Owner column value to system users.
+ * Supports multiple names separated by comma, semicolon, slash, newline, &, or "and".
+ */
+export function matchOwnersFromHint(
+  ownerHint: string,
+  directory: { id: number; fullName: string }[],
+): OwnerMatchResult {
+  const tokens = splitOwnerNames(ownerHint);
+  if (tokens.length === 0 || directory.length === 0) {
+    return { matched: [], unmatched: tokens };
   }
-  return null;
+
+  const matched: { id: number; fullName: string }[] = [];
+  const unmatched: string[] = [];
+  const usedIds = new Set<number>();
+
+  for (const token of tokens) {
+    let best: { id: number; fullName: string; score: number } | null = null;
+    for (const u of directory) {
+      if (usedIds.has(u.id)) continue;
+      const score = scoreNameMatch(token, u.fullName);
+      if (score >= 40 && (!best || score > best.score)) {
+        best = { id: u.id, fullName: u.fullName, score };
+      }
+    }
+    if (best) {
+      usedIds.add(best.id);
+      matched.push({ id: best.id, fullName: best.fullName });
+    } else {
+      unmatched.push(token);
+    }
+  }
+
+  return { matched, unmatched };
 }
 
 /** Convert structured DOCX/XLSX table rows into action drafts. */
@@ -219,12 +325,15 @@ export function parseActionsFromMappedTable(rows: MappedActionRow[]): ParsedActi
     const k = title.toLowerCase();
     if (seen.has(k)) return;
     seen.add(k);
+    const mapped = mapImportStatus(r.statusHint);
     out.push({
       key: `tbl-${r.no || i + 1}-${i}`,
       title,
       ownerHint: r.ownerHint,
       deadline: parseDueDate(r.deadlineRaw || "Immediately"),
       statusHint: r.statusHint,
+      status: mapped.status,
+      progress: mapped.progress,
       include: true,
     });
   });

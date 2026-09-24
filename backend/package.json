@@ -18,7 +18,8 @@
   "dependencies": {
     "@azure/functions": "^4.5.1",
     "@prisma/client": "^5.20.0",
-    "docx": "^9.5.0"
+    "docx": "^9.5.0",
+    "jose": "^5.9.6"
   },
   "devDependencies": {
     "@types/node": "^20.14.9",

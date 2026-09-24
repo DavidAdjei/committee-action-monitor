@@ -443,7 +443,7 @@ export default function CommitteeWorkspace() {
               {detail.members.length} active member{detail.members.length === 1 ? "" : "s"}
               {canMembers ? " · Chairperson and Secretary can add or remove members" : ""}
             </p>
-            <div className="max-h-72 space-y-1.5 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+            <div className="max-h-72 space-y-1.5 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-800">
               {detail.members.length === 0 && (
                 <p className="py-2 text-sm text-slate-400">No members listed yet.</p>
               )}

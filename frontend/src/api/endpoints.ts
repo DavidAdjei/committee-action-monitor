@@ -33,6 +33,23 @@ export const endpoints = {
     >("/dev/users"),
 
   directory: (q: string) => api.get<DirectoryUser[]>(`/directory?q=${encodeURIComponent(q)}`),
+  syncDirectory: () =>
+    api.post<{
+      created: number;
+      updated: number;
+      skipped: number;
+      totalFromGraph: number;
+      graphConfigured: boolean;
+    }>("/directory/sync", {}),
+  directoryStatus: () =>
+    api.get<{
+      activeUsers: number;
+      linkedToEntra: number;
+      graphConfigured: boolean;
+      jwtConfigured: boolean;
+      autoProvision: boolean;
+    }>("/directory/status"),
+
 
   committees: () => api.get<CommitteeSummary[]>("/committees"),
   committee: (id: number) => api.get<CommitteeDetail>(`/committees/${id}`),
@@ -120,6 +137,8 @@ export const endpoints = {
         ownerIds: number[];
         deadline?: string;
         priority?: string;
+        status?: string;
+        progress?: number;
       }[];
     },
   ) =>

@@ -1,6 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { requireUser } from "../lib/auth";
-import { loadMemberships } from "../lib/authorize";
+import { loadMemberships, isCentralMember } from "../lib/authorize";
 import { ok, errorResponse, preflight, Errors, corsHeaders } from "../lib/http";
 import { bankWideDashboard, committeeSummary } from "../services/reportService";
 import { prisma } from "../lib/prisma";
@@ -9,8 +9,8 @@ async function dashboard(req: HttpRequest, _ctx: InvocationContext): Promise<Htt
   if (req.method === "OPTIONS") return preflight();
   try {
     const user = await requireUser(req);
-    if (!user.isCentralCommittee) {
-      throw Errors.forbidden("The bank-wide dashboard is available to Central Committee Members only.");
+    if (!isCentralMember(user)) {
+      throw Errors.forbidden("The bank-wide dashboard is available to Central Committee Members and Administrators only.");
     }
     return ok(await bankWideDashboard());
   } catch (err) {
@@ -23,7 +23,7 @@ async function summary(req: HttpRequest, _ctx: InvocationContext): Promise<HttpR
   try {
     const user = await requireUser(req);
     const memberships = await loadMemberships(user.id);
-    const ids = user.isCentralCommittee ? undefined : memberships.map((m) => m.committeeId);
+    const ids = isCentralMember(user) ? undefined : memberships.map((m) => m.committeeId);
     return ok(await committeeSummary(ids));
   } catch (err) {
     return errorResponse(err);
@@ -50,14 +50,14 @@ async function actionsExport(req: HttpRequest, _ctx: InvocationContext): Promise
   try {
     const user = await requireUser(req);
     const memberships = await loadMemberships(user.id);
-    const permittedIds = user.isCentralCommittee
+    const permittedIds = isCentralMember(user)
       ? undefined
       : memberships.map((m) => m.committeeId);
 
-    if (!user.isCentralCommittee && (!permittedIds || permittedIds.length === 0)) {
+    if (!isCentralMember(user) && (!permittedIds || permittedIds.length === 0)) {
       return {
         status: 200,
-        body: "referenceNo,title,committee,owner,status,priority,progress,deadline,dateRaised\n",
+        body: "referenceNo,title,committee,committeeCode,owner,status,priority,progress,deadline,dateRaised,revisedDeadline\n",
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
           "Content-Disposition": 'attachment; filename="action-register.csv"',

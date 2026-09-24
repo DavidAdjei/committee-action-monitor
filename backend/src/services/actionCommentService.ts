@@ -89,6 +89,7 @@ export async function addActionComment(params: {
   return comment;
 }
 
+/** Standalone list helper (detail embed is the primary path). Kept for API/extension use. */
 export async function listActionComments(actionPointId: number) {
   return prisma.actionComment.findMany({
     where: { actionPointId },

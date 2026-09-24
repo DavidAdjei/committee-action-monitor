@@ -29,12 +29,11 @@ export async function isCommitteeOfficer(userId: number, committeeId: number): P
   return membership !== null;
 }
 
-/** Throws 403 unless the user is the active Chairperson or Secretary of the committee. */
+/** Throws 403 unless admin, or active Chairperson/Secretary of the committee. */
 export async function requireCommitteeOfficer(user: User, committeeId: number): Promise<void> {
-  if (isCentralMember(user)) {
-    // Central Committee access is read-only for writes — sub-role does not
-    // grant Chair/Secretary powers on a sub-committee.
-  }
+  // Platform admin (is_admin): full write access across all committees
+  if (user.isAdmin) return;
+  // Ordinary Central Committee members remain view-only for officer writes
   const authorized = await isCommitteeOfficer(user.id, committeeId);
   if (!authorized) {
     throw Errors.forbidden("Only the committee's active Chairperson or Secretary may do this.");

@@ -15,13 +15,27 @@ function asConflictOnMissingRecord(err: unknown): never {
   throw err;
 }
 
-export async function nextReferenceNo(): Promise<string> {
+/** Next AP-YYYY-NNN from max existing sequence (safer than count under deletes). */
+export async function nextReferenceNo(
+  db: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<string> {
   const year = new Date().getFullYear();
-  const count = await prisma.actionPoint.count({
-    where: { referenceNo: { startsWith: `AP-${year}-` } },
+  const prefix = `AP-${year}-`;
+  const latest = await db.actionPoint.findFirst({
+    where: { referenceNo: { startsWith: prefix } },
+    orderBy: { referenceNo: "desc" },
+    select: { referenceNo: true },
   });
-  const seq = String(count + 1).padStart(3, "0");
-  return `AP-${year}-${seq}`;
+  let next = 1;
+  if (latest?.referenceNo) {
+    const n = parseInt(latest.referenceNo.slice(prefix.length), 10);
+    if (!Number.isNaN(n)) next = n + 1;
+  }
+  return `${prefix}${String(next).padStart(3, "0")}`;
+}
+
+function isUniqueConflict(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002";
 }
 
 export interface CreateActionPointInput {
@@ -36,6 +50,9 @@ export interface CreateActionPointInput {
   dateRaised: Date;
   deadline: Date;
   priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  /** Optional initial status (e.g. document import). Defaults to OPEN. */
+  status?: "OPEN" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE" | "PENDING_VERIFICATION" | "CANCELLED";
+  progress?: number;
   minutesReference?: string;
   additionalStakeholderIds?: number[];
   createdById: number;
@@ -61,10 +78,13 @@ export async function createActionPoint(input: CreateActionPointInput) {
     throw Errors.badRequest("Deadline cannot precede the date raised.");
   }
 
-  const referenceNo = await nextReferenceNo();
   const committee = meeting.committee;
+  const maxAttempts = 5;
 
-  return prisma.$transaction(async (tx) => {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  try {
+  return await prisma.$transaction(async (tx) => {
+    const referenceNo = await nextReferenceNo(tx);
     const action = await tx.actionPoint.create({
       data: {
         referenceNo,
@@ -77,7 +97,9 @@ export async function createActionPoint(input: CreateActionPointInput) {
         dateRaised: input.dateRaised,
         deadline: input.deadline,
         priority: input.priority ?? "MEDIUM",
-        status: "OPEN",
+        status: input.status ?? "OPEN",
+        progress: Math.min(100, Math.max(0, input.progress ?? (input.status === "COMPLETED" ? 100 : 0))),
+        completedAt: input.status === "COMPLETED" ? new Date() : undefined,
         createdById: input.createdById,
       },
     });
@@ -132,6 +154,14 @@ export async function createActionPoint(input: CreateActionPointInput) {
 
     return action;
   });
+  } catch (err) {
+    if (isUniqueConflict(err) && attempt < maxAttempts - 1) {
+      continue;
+    }
+    throw err;
+  }
+  }
+  throw Errors.conflict("Could not allocate a unique action reference number. Please try again.");
 }
 
 export interface RecordActionUpdateInput {

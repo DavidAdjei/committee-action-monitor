@@ -1,7 +1,8 @@
 import { prisma } from "../lib/prisma";
 import { buildActionNotifications } from "./notificationService";
 
-const ACTIVE_STATUSES = ["OPEN", "IN_PROGRESS", "PENDING_VERIFICATION"] as const;
+/** Work still owned by the action owner — subject to daily reminders + auto-overdue. */
+const WORK_IN_PROGRESS_STATUSES = ["OPEN", "IN_PROGRESS"] as const;
 
 /**
  * Run once daily (see functions/dailyReminderTimer.ts). Reproduces
@@ -9,9 +10,10 @@ const ACTIVE_STATUSES = ["OPEN", "IN_PROGRESS", "PENDING_VERIFICATION"] as const
  * in the same Prisma transaction semantics and notification outbox as
  * every other write path:
  *   1. Queue one reminder per stakeholder per day, from 14 days before the
- *      deadline through the deadline, for every still-active action.
- *   2. Move any action whose deadline has passed into OVERDUE and queue an
- *      escalation notification for every stakeholder.
+ *      deadline through the deadline, for OPEN / IN_PROGRESS actions only.
+ *   2. Move OPEN / IN_PROGRESS past deadline into OVERDUE and queue escalation.
+ *   PENDING_VERIFICATION is excluded: approval is with Chair/Secretary; auto-overdue
+ *   would remove items from the verification queue and block approve.
  * Idempotency keys are date-scoped, so re-running this on the same day is
  * always a safe no-op for actions already processed today.
  */
@@ -26,7 +28,7 @@ export async function runDailyReminderAndEscalation(): Promise<{
 
   const dueForReminder = await prisma.actionPoint.findMany({
     where: {
-      status: { in: [...ACTIVE_STATUSES] },
+      status: { in: [...WORK_IN_PROGRESS_STATUSES] },
       deadline: { gte: today, lte: in14Days },
     },
     include: { stakeholders: true },
@@ -48,7 +50,7 @@ export async function runDailyReminderAndEscalation(): Promise<{
 
   const overdueCandidates = await prisma.actionPoint.findMany({
     where: {
-      status: { in: [...ACTIVE_STATUSES] },
+      status: { in: [...WORK_IN_PROGRESS_STATUSES] },
       deadline: { lt: today },
     },
     include: { stakeholders: true },

@@ -1,7 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
-import { loadMemberships, requireAdmin } from "../lib/authorize";
+import { loadMemberships, requireAdmin, isCentralMember } from "../lib/authorize";
 import { recordDenied } from "../services/auditService";
 import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
 import { committeeSummary } from "../services/reportService";
@@ -12,9 +12,9 @@ async function listCommittees(req: HttpRequest, _ctx: InvocationContext): Promis
   try {
     const user = await requireUser(req);
     const memberships = await loadMemberships(user.id);
-    const permittedIds = user.isCentralCommittee ? undefined : memberships.map((m) => m.committeeId);
+    const permittedIds = isCentralMember(user) ? undefined : memberships.map((m) => m.committeeId);
 
-    if (!user.isCentralCommittee && permittedIds!.length === 0) return ok([]);
+    if (!isCentralMember(user) && permittedIds!.length === 0) return ok([]);
 
     const committees = await prisma.committee.findMany({
       where: permittedIds ? { id: { in: permittedIds } } : undefined,

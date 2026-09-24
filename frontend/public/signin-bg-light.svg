@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="lgSky" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E8F1F8"/>
+      <stop offset="50%" stop-color="#D6E6F2"/>
+      <stop offset="100%" stop-color="#C5D9EB"/>
+    </linearGradient>
+    <linearGradient id="lgWall" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F7FAFC"/>
+      <stop offset="100%" stop-color="#E2EEF6"/>
+    </linearGradient>
+    <linearGradient id="lgWood" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#C4A574"/>
+      <stop offset="100%" stop-color="#A67C52"/>
+    </linearGradient>
+    <linearGradient id="lgPaper" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#F0F4F8"/>
+    </linearGradient>
+    <linearGradient id="lgNavy" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1B4F8A"/>
+      <stop offset="100%" stop-color="#0B2A4A"/>
+    </linearGradient>
+    <filter id="lgSoft" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+    <filter id="lgShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#0B2A4A" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <!-- Room wall & floor -->
+  <rect width="1920" height="1080" fill="url(#lgSky)"/>
+  <rect y="620" width="1920" height="460" fill="#DCE6EF"/>
+  <path d="M0 620 L960 560 L1920 620 L1920 1080 L0 1080 Z" fill="#CBD8E6" opacity="0.9"/>
+
+  <!-- Window light panels (back wall) -->
+  <g opacity="0.9">
+    <rect x="180" y="80" width="280" height="360" rx="8" fill="#F5FAFF" stroke="#B8C9D9" stroke-width="3"/>
+    <rect x="480" y="80" width="280" height="360" rx="8" fill="#F5FAFF" stroke="#B8C9D9" stroke-width="3"/>
+    <rect x="1160" y="80" width="280" height="360" rx="8" fill="#F5FAFF" stroke="#B8C9D9" stroke-width="3"/>
+    <rect x="1460" y="80" width="280" height="360" rx="8" fill="#F5FAFF" stroke="#B8C9D9" stroke-width="3"/>
+    <line x1="320" y1="80" x2="320" y2="440" stroke="#B8C9D9" stroke-width="2"/>
+    <line x1="620" y1="80" x2="620" y2="440" stroke="#B8C9D9" stroke-width="2"/>
+    <line x1="1300" y1="80" x2="1300" y2="440" stroke="#B8C9D9" stroke-width="2"/>
+    <line x1="1600" y1="80" x2="1600" y2="440" stroke="#B8C9D9" stroke-width="2"/>
+    <line x1="180" y1="260" x2="460" y2="260" stroke="#B8C9D9" stroke-width="2"/>
+    <line x1="480" y1="260" x2="760" y2="260" stroke="#B8C9D9" stroke-width="2"/>
+  </g>
+
+  <!-- Conference table (ellipse top + legs) -->
+  <ellipse cx="960" cy="720" rx="620" ry="120" fill="url(#lgWood)" filter="url(#lgShadow)"/>
+  <ellipse cx="960" cy="708" rx="600" ry="105" fill="#D4B896"/>
+  <ellipse cx="960" cy="700" rx="580" ry="90" fill="#E0C6A4"/>
+  <!-- Table reflection line -->
+  <ellipse cx="960" cy="695" rx="520" ry="12" fill="#FFFFFF" opacity="0.25"/>
+
+  <!-- Agenda papers on table -->
+  <g filter="url(#lgShadow)">
+    <rect x="720" y="640" width="140" height="100" rx="3" fill="url(#lgPaper)" transform="rotate(-8 790 690)"/>
+    <rect x="880" y="630" width="150" height="110" rx="3" fill="url(#lgPaper)" transform="rotate(3 955 685)"/>
+    <rect x="1050" y="645" width="130" height="95" rx="3" fill="url(#lgPaper)" transform="rotate(-4 1115 692)"/>
+  </g>
+  <!-- Text lines on papers -->
+  <g stroke="#94A3B8" stroke-width="2" opacity="0.5">
+    <line x1="740" y1="665" x2="840" y2="655"/>
+    <line x1="745" y1="680" x2="835" y2="670"/>
+    <line x1="750" y1="695" x2="830" y2="685"/>
+    <line x1="900" y1="660" x2="1005" y2="665"/>
+    <line x1="905" y1="680" x2="1000" y2="685"/>
+    <line x1="910" y1="700" x2="995" y2="705"/>
+    <line x1="1070" y1="670" x2="1160" y2="662"/>
+    <line x1="1075" y1="688" x2="1155" y2="680"/>
+  </g>
+
+  <!-- Laptops / devices simplified -->
+  <g filter="url(#lgShadow)">
+    <rect x="580" y="655" width="100" height="65" rx="4" fill="#334155"/>
+    <rect x="588" y="662" width="84" height="48" rx="2" fill="#7DD3FC" opacity="0.7"/>
+    <rect x="1240" y="650" width="100" height="65" rx="4" fill="#334155"/>
+    <rect x="1248" y="657" width="84" height="48" rx="2" fill="#BAE6FD" opacity="0.7"/>
+  </g>
+
+  <!-- Chairs around table (simple silhouettes) -->
+  <g fill="#64748B" opacity="0.45">
+    <rect x="500" y="780" width="70" height="50" rx="8"/>
+    <rect x="620" y="800" width="70" height="50" rx="8"/>
+    <rect x="1230" y="800" width="70" height="50" rx="8"/>
+    <rect x="1350" y="780" width="70" height="50" rx="8"/>
+    <rect x="900" y="820" width="120" height="55" rx="8"/>
+  </g>
+
+  <!-- Wall board / agenda board -->
+  <g filter="url(#lgShadow)">
+    <rect x="820" y="120" width="280" height="200" rx="6" fill="#FFFFFF" stroke="#94A3B8" stroke-width="2"/>
+    <rect x="820" y="120" width="280" height="36" rx="6" fill="url(#lgNavy)"/>
+    <text x="960" y="144" text-anchor="middle" fill="#FFFFFF" font-family="system-ui,sans-serif" font-size="16" font-weight="600">Committee Agenda</text>
+    <line x1="850" y1="180" x2="1070" y2="180" stroke="#CBD5E1" stroke-width="3"/>
+    <line x1="850" y1="210" x2="1040" y2="210" stroke="#CBD5E1" stroke-width="3"/>
+    <line x1="850" y1="240" x2="1060" y2="240" stroke="#CBD5E1" stroke-width="3"/>
+    <line x1="850" y1="270" x2="1000" y2="270" stroke="#CBD5E1" stroke-width="3"/>
+  </g>
+
+  <!-- Soft vignette -->
+  <rect width="1920" height="1080" fill="#0B2A4A" opacity="0.04"/>
+</svg>

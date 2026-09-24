@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { Errors } from "../lib/http";
 import { auditRow } from "./auditService";
@@ -59,48 +60,68 @@ export async function generateMeetingReference(
  * is a separate integration step (see services/graphService.ts).
  */
 export async function createMeeting(input: CreateMeetingInput) {
-  return prisma.$transaction(async (tx) => {
-    const reference =
-      input.reference && input.reference.trim().length > 0 && input.reference.trim().toLowerCase() !== "auto"
-        ? input.reference.trim()
-        : await generateMeetingReference(input.committeeId, input.startsAt, tx);
+  const maxAttempts = 5;
+  const fixedRef =
+    input.reference && input.reference.trim().length > 0 && input.reference.trim().toLowerCase() !== "auto"
+      ? input.reference.trim()
+      : null;
 
-    const existing = await tx.meeting.findFirst({
-      where: { committeeId: input.committeeId, reference },
-    });
-    if (existing) {
-      throw Errors.conflict("A meeting with this reference already exists for this committee.");
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const reference =
+          fixedRef ?? (await generateMeetingReference(input.committeeId, input.startsAt, tx));
+
+        const existing = await tx.meeting.findFirst({
+          where: { committeeId: input.committeeId, reference },
+        });
+        if (existing) {
+          if (fixedRef) {
+            throw Errors.conflict("A meeting with this reference already exists for this committee.");
+          }
+          const retry = new Error("MEETING_REF_RETRY") as Error & { code: string };
+          retry.code = "MEETING_REF_RETRY";
+          throw retry;
+        }
+
+        const meeting = await tx.meeting.create({
+          data: {
+            committeeId: input.committeeId,
+            reference,
+            title: input.title,
+            startsAt: input.startsAt,
+            endsAt: input.endsAt,
+            venue: input.venue,
+            agenda: input.agenda,
+            teamsRequested: input.teamsRequested ?? false,
+            attendanceToken: randomBytes(24).toString("hex"),
+            createdById: input.createdById,
+          },
+        });
+
+        await tx.auditEvent.create({
+          data: auditRow({
+            actorUserId: input.createdById,
+            action: "meeting.create",
+            resourceType: "meeting",
+            resourceId: meeting.id,
+            committeeId: input.committeeId,
+            after: { reference, title: input.title },
+            result: "SUCCESS",
+          }),
+        });
+
+        return meeting;
+      });
+    } catch (err) {
+      const unique =
+        (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") ||
+        (err instanceof Error && (err as Error & { code?: string }).code === "MEETING_REF_RETRY");
+      if (unique && !fixedRef && attempt < maxAttempts - 1) continue;
+      throw err;
     }
-
-    const meeting = await tx.meeting.create({
-      data: {
-        committeeId: input.committeeId,
-        reference,
-        title: input.title,
-        startsAt: input.startsAt,
-        endsAt: input.endsAt,
-        venue: input.venue,
-        agenda: input.agenda,
-        teamsRequested: input.teamsRequested ?? false,
-        attendanceToken: randomBytes(24).toString("hex"),
-        createdById: input.createdById,
-      },
-    });
-
-    await tx.auditEvent.create({
-      data: auditRow({
-        actorUserId: input.createdById,
-        action: "meeting.create",
-        resourceType: "meeting",
-        resourceId: meeting.id,
-        committeeId: input.committeeId,
-        after: { reference, title: input.title },
-        result: "SUCCESS",
-      }),
-    });
-
-    return meeting;
-  });
+  }
+  throw Errors.conflict("Could not allocate a unique meeting reference. Please try again.");
 }
 
 /** Attach the Microsoft Graph online-meeting result once the integration worker completes it. */

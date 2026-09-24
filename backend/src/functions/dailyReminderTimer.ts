@@ -14,7 +14,7 @@ async function dailyReminderTimer(_timer: Timer, ctx: InvocationContext): Promis
   const meetingResult = await runMeetingFollowUpReminders();
   ctx.log(
     `Daily job complete: ${actionResult.remindersQueued} action reminders, ${actionResult.escalated} escalated; ` +
-      `${meetingResult.actionsReminders} meeting-actions alerts, ${meetingResult.minutesReminders} minutes alerts queued.`,
+    `${meetingResult.actionsReminders} meeting-actions alerts, ${meetingResult.minutesReminders} minutes alerts queued.`,
   );
 }
 

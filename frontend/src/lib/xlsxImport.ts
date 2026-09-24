@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import type { ParsedActionDraft } from "./importParse";
-import { parseActionsFromText } from "./importParse";
+import { mapImportStatus, parseActionsFromText } from "./importParse";
 
 /**
  * Read first sheet of an Excel workbook into plain text (tab-separated rows)
@@ -92,12 +92,15 @@ export function parseActionsFromSpreadsheetRows(rows: string[][]): ParsedActionD
     } else {
       const d = new Date();
       d.setDate(d.getDate() + 14);
+      const mapped = mapImportStatus(statusHint);
       actions.push({
         key: `xlsx-${r}-${actions.length}`,
         title,
         ownerHint,
         deadline: d.toISOString().slice(0, 10),
         statusHint,
+        status: mapped.status,
+        progress: mapped.progress,
         include: true,
       });
     }
