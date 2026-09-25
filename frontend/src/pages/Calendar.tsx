@@ -217,7 +217,7 @@ export default function CalendarPage() {
                       className={[
                         "relative flex min-h-[3.25rem] flex-col items-stretch rounded-lg border p-1 text-left transition sm:min-h-[4.5rem] sm:p-1.5",
                         isSelected
-                          ? "border-brand-500 bg-brand-50 ring-2 ring-brand-500/30 dark:border-brand-500 dark:bg-brand-950/40"
+                          ? "border-brand-500 bg-brand-50 ring-2 ring-brand-500/30 dark:border-brand-400 dark:bg-brand-500 dark:ring-brand-400/40"
                           : has
                             ? "border-brand-200 bg-white hover:border-brand-400 dark:border-brand-900 dark:bg-slate-800 dark:hover:border-brand-600"
                             : "border-transparent bg-white hover:bg-slate-50 dark:bg-slate-800/60 dark:hover:bg-slate-800/50",
@@ -227,9 +227,11 @@ export default function CalendarPage() {
                       <span
                         className={[
                           "inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
-                          isToday
-                            ? "bg-brand-500 text-white"
-                            : "text-slate-700 dark:text-slate-200",
+                          isSelected
+                            ? "text-brand-900 dark:text-white"
+                            : isToday
+                              ? "bg-brand-500 text-white"
+                              : "text-slate-700 dark:text-slate-200",
                         ].join(" ")}
                       >
                         {day.getDate()}

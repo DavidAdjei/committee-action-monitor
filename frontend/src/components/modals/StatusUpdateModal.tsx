@@ -147,7 +147,7 @@ export function StatusUpdateModal({
                 onClick={() => setStatus(s.value)}
                 className={`rounded-lg border p-3 text-left text-xs transition ${
                   status === s.value
-                    ? "border-brand-500 bg-brand-50 text-brand-800 dark:bg-brand-950 dark:text-brand-200"
+                    ? "border-brand-500 bg-brand-50 text-brand-900 dark:border-brand-400 dark:bg-brand-500 dark:text-white"
                     : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-600 dark:text-slate-300"
                 }`}
               >

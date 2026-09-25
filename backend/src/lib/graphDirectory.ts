@@ -2,8 +2,16 @@
  * Microsoft Graph directory sync (application permissions).
  * Lists tenant users and upserts them into the local User table.
  *
- * Required app permissions (admin consent): User.Read.All
+ * Required app permission (admin consent): User.ReadBasic.All
+ * (Works with the limited basic profile — id, displayName, mail, UPN.
+ *  Does not read department or accountEnabled; those need User.Read.All.)
+ *
  * Auth: client credentials (app-only).
+ *
+ * Env (either prefix works):
+ *   ENTRA_GRAPH_TENANT_ID / GRAPH_TENANT_ID
+ *   ENTRA_GRAPH_CLIENT_ID  / GRAPH_CLIENT_ID
+ *   ENTRA_GRAPH_CLIENT_SECRET / GRAPH_CLIENT_SECRET
  */
 import { prisma } from "./prisma";
 import { Errors } from "./http";
@@ -13,22 +21,29 @@ type GraphUser = {
   displayName?: string;
   mail?: string | null;
   userPrincipalName?: string;
-  department?: string | null;
-  accountEnabled?: boolean;
 };
+
+function env(name: string, aliases: string[] = []): string | undefined {
+  const keys = [name, ...aliases];
+  for (const k of keys) {
+    const v = process.env[k];
+    if (v && v.trim()) return v.trim();
+  }
+  return undefined;
+}
 
 function graphConfigured(): boolean {
   return Boolean(
-    process.env.ENTRA_GRAPH_TENANT_ID &&
-      process.env.ENTRA_GRAPH_CLIENT_ID &&
-      process.env.ENTRA_GRAPH_CLIENT_SECRET,
+    env("ENTRA_GRAPH_TENANT_ID", ["GRAPH_TENANT_ID"]) &&
+      env("ENTRA_GRAPH_CLIENT_ID", ["GRAPH_CLIENT_ID"]) &&
+      env("ENTRA_GRAPH_CLIENT_SECRET", ["GRAPH_CLIENT_SECRET"]),
   );
 }
 
 async function getAppToken(): Promise<string> {
-  const tenant = process.env.ENTRA_GRAPH_TENANT_ID!;
-  const clientId = process.env.ENTRA_GRAPH_CLIENT_ID!;
-  const clientSecret = process.env.ENTRA_GRAPH_CLIENT_SECRET!;
+  const tenant = env("ENTRA_GRAPH_TENANT_ID", ["GRAPH_TENANT_ID"])!;
+  const clientId = env("ENTRA_GRAPH_CLIENT_ID", ["GRAPH_CLIENT_ID"])!;
+  const clientSecret = env("ENTRA_GRAPH_CLIENT_SECRET", ["GRAPH_CLIENT_SECRET"])!;
 
   const body = new URLSearchParams({
     client_id: clientId,
@@ -51,19 +66,25 @@ async function getAppToken(): Promise<string> {
   return json.access_token;
 }
 
+/**
+ * List users using only properties allowed by User.ReadBasic.All.
+ * No $filter on accountEnabled / department — those require User.Read.All.
+ */
 async function listAllGraphUsers(accessToken: string): Promise<GraphUser[]> {
-  const select = "$select=id,displayName,mail,userPrincipalName,department,accountEnabled";
-  let url: string | null =
-    `https://graph.microsoft.com/v1.0/users?${select}&$top=100&$filter=accountEnabled eq true`;
+  const select = "$select=id,displayName,mail,userPrincipalName";
+  let url: string | null = `https://graph.microsoft.com/v1.0/users?${select}&$top=100`;
 
   const out: GraphUser[] = [];
   while (url) {
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}`, ConsistencyLevel: "eventual" },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) {
       const t = await res.text();
-      throw Errors.badRequest(`Graph users list failed: ${res.status} ${t.slice(0, 300)}`);
+      throw Errors.badRequest(
+        `Graph users list failed: ${res.status} ${t.slice(0, 300)}. ` +
+          `Ensure the app has Application permission User.ReadBasic.All with admin consent.`,
+      );
     }
     const json = (await res.json()) as { value?: GraphUser[]; "@odata.nextLink"?: string };
     out.push(...(json.value ?? []));
@@ -81,6 +102,9 @@ function emailOf(u: GraphUser): string | null {
  * Upsert Graph users into local DB.
  * Match order: entraObjectId → email → create new.
  * Does not delete local users missing from Graph.
+ *
+ * With User.ReadBasic.All: department is left unchanged on update / null on create;
+ * active defaults to true (disabled accounts cannot be detected).
  */
 export async function syncUsersFromEntra(): Promise<{
   created: number;
@@ -90,7 +114,7 @@ export async function syncUsersFromEntra(): Promise<{
 }> {
   if (!graphConfigured()) {
     throw Errors.badRequest(
-      "Graph directory sync is not configured. Set ENTRA_GRAPH_TENANT_ID, ENTRA_GRAPH_CLIENT_ID, ENTRA_GRAPH_CLIENT_SECRET.",
+      "Graph directory sync is not configured. Set ENTRA_GRAPH_TENANT_ID, ENTRA_GRAPH_CLIENT_ID, ENTRA_GRAPH_CLIENT_SECRET (or GRAPH_* aliases).",
     );
   }
 
@@ -108,14 +132,13 @@ export async function syncUsersFromEntra(): Promise<{
       continue;
     }
     const fullName = (g.displayName || email.split("@")[0]).trim();
-    const department = g.department ?? null;
-    const active = g.accountEnabled !== false;
 
     const byOid = await prisma.user.findUnique({ where: { entraObjectId: g.id } });
     if (byOid) {
+      // Preserve existing department / active — basic profile does not supply them
       await prisma.user.update({
         where: { id: byOid.id },
-        data: { fullName, email, department, active },
+        data: { fullName, email },
       });
       updated += 1;
       continue;
@@ -128,8 +151,6 @@ export async function syncUsersFromEntra(): Promise<{
         data: {
           entraObjectId: byEmail.entraObjectId ?? g.id,
           fullName,
-          department,
-          active,
         },
       });
       updated += 1;
@@ -141,8 +162,8 @@ export async function syncUsersFromEntra(): Promise<{
         entraObjectId: g.id,
         fullName,
         email,
-        department,
-        active,
+        department: null,
+        active: true,
         isCentralCommittee: false,
         isAdmin: false,
       },

@@ -57,7 +57,7 @@ export function LoadingLogo({
         >
           {/* Logo image tag with blank src as requested for user to populate */}
           <img
-            src=""
+            src="/umb-logo.png"
             alt="UMB Logo"
             className="max-h-full max-w-full object-contain select-none"
             onError={(e) => {
@@ -109,7 +109,7 @@ export function LoadingLogo({
           <div className="h-5 w-5 rounded-full border-2 border-brand-500/30 border-t-brand-500 animate-spin" />
           <div className="absolute h-3.5 w-3.5 flex items-center justify-center rounded bg-white dark:bg-slate-800">
             <img
-              src=""
+              src="/umb-logo.png"
               alt="Logo"
               className="max-h-full max-w-full object-contain"
               onError={(e) => {

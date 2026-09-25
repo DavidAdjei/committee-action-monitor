@@ -14,7 +14,7 @@ export function SetChairModal({
 }: {
   committeeId: number;
   committeeName: string;
-  currentChairperson: { id: number; fullName: string };
+  currentChairperson?: { id: number; fullName: string } | null;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -27,8 +27,8 @@ export function SetChairModal({
 
   useEffect(() => {
     endpoints.directory(query).then((users) => {
-      // Exclude current chairperson
-      setCandidates(users.filter((u) => u.id !== currentChairperson.id));
+      const excludeId = currentChairperson?.id;
+      setCandidates(excludeId ? users.filter((u) => u.id !== excludeId) : users);
     });
   }, [query, currentChairperson.id]);
 
@@ -66,7 +66,7 @@ export function SetChairModal({
           <p className="text-xs font-medium uppercase text-slate-400">Current Chairperson</p>
           <p className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5 mt-0.5">
             <Crown className="h-4 w-4 text-brand-500" />
-            {currentChairperson.fullName}
+            {currentChairperson?.fullName ?? "None"}
           </p>
         </div>
 

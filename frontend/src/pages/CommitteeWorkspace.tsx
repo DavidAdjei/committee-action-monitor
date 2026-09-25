@@ -779,6 +779,34 @@ export default function CommitteeWorkspace() {
           }}
         />
       )}
+
+      {showSetChair && (
+        <SetChairModal
+          committeeId={committeeId}
+          committeeName={detail.name}
+          currentChairperson={detail.chairperson}
+          onClose={() => setShowSetChair(false)}
+          onChanged={refreshAll}
+        />
+      )}
+      {showAddMember && (
+        <AddMemberModal
+          committeeId={committeeId}
+          committeeName={detail.name}
+          existingMemberIds={detail.members.map((m) => m.userId)}
+          onClose={() => setShowAddMember(false)}
+          onAdded={refreshAll}
+        />
+      )}
+      {showSetCentralRep && (
+        <SetCentralRepModal
+          committeeId={committeeId}
+          committeeName={detail.name}
+          currentRepId={detail.centralRep?.id ?? null}
+          onClose={() => setShowSetCentralRep(false)}
+          onSaved={refreshAll}
+        />
+      )}
     </div>
   );
 }

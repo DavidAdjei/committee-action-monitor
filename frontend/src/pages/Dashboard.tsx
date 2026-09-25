@@ -44,31 +44,74 @@ function StatCard({
   value,
   subtext,
   tone = "text-ink dark:text-white",
-  highlight,
+  variant = "brand",
+  iconMotion = "float",
 }: {
   icon: React.ReactNode;
   label: string;
   value: string | number;
   subtext?: string;
   tone?: string;
-  highlight?: boolean;
+  variant?: "brand" | "success" | "warning" | "danger" | "info";
+  iconMotion?: "float" | "spin" | "pulse" | "none";
 }) {
+  const [display, setDisplay] = useState(0);
+
+  useEffect(() => {
+    if (typeof value !== "number") return;
+    let frame = 0;
+    const duration = 850;
+    const start = performance.now();
+    const to = value;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(Math.round(to * eased));
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value]);
+
+  const motionCls =
+    iconMotion === "spin"
+      ? "dash-icon-spin"
+      : iconMotion === "pulse"
+        ? "dash-icon-pulse"
+        : iconMotion === "float"
+          ? "dash-icon-float"
+          : "";
+
+  const iconTone =
+    variant === "success"
+      ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400"
+      : variant === "warning"
+        ? "bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
+        : variant === "danger"
+          ? "bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400"
+          : variant === "info"
+            ? "bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400"
+            : "bg-brand-50 text-brand-600 dark:bg-brand-950 dark:text-brand-400";
+
   return (
-    <div
-      className={`card flex flex-col justify-between transition hover:shadow-md ${
-        highlight ? "border-brand-500/40 bg-brand-50/20 dark:bg-brand-950/20" : ""
-      }`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-400">{label}</p>
-          <p className={`mt-1 text-2xl font-bold tracking-tight ${tone}`}>{value}</p>
+    <div className="dash-kpi group" data-v={variant}>
+      <div className="dash-kpi-inner flex h-full flex-col justify-between">
+        <span className="dash-shine" aria-hidden />
+        <div className="relative z-[3] flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+            <p className={`mt-1.5 text-2xl font-extrabold tracking-tight ${tone}`}>
+              {typeof value === "number" ? display : value}
+            </p>
+          </div>
+          <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${iconTone} ${motionCls}`}>
+            {icon}
+          </div>
         </div>
-        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-950 dark:text-brand-400">
-          {icon}
-        </div>
+        {subtext && (
+          <p className="relative z-[3] mt-3 text-xs text-slate-500 dark:text-slate-400">{subtext}</p>
+        )}
       </div>
-      {subtext && <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{subtext}</p>}
     </div>
   );
 }
@@ -147,16 +190,11 @@ export default function Dashboard() {
   const rateCompliant = onTimeRateValue >= 85;
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="dash-page space-y-6 pb-12">
       {/* Header Banner */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-extrabold text-ink dark:text-white">Central Committee Executive Oversight</h1>
-            <span className="inline-flex items-center gap-1 rounded-md bg-brand-50 px-2.5 py-0.5 text-xs font-semibold text-brand-700 dark:bg-brand-950 dark:text-brand-300 border border-brand-200 dark:border-brand-900">
-              <ShieldCheck className="h-3.5 w-3.5" /> Bank-wide Cockpit
-            </span>
-          </div>
+          <h1 className="text-2xl font-extrabold text-ink dark:text-white">Central Committee Executive Oversight</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             Real-time compliance tracking, committee performance matrix, and escalation radar.
           </p>
@@ -199,12 +237,17 @@ export default function Dashboard() {
       </div>
 
       {/* Executive KPI Ribbon */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
+      <div
+        className="dash-kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6"
+        key={summary ? `kpi-${summary.totalActions}-${summary.overdue}-${summary.completedOnTime}` : "kpi"}
+      >
         <StatCard
           icon={<ListChecks className="h-5 w-5" />}
           label="Total Actions"
           value={summary.totalActions}
           subtext="Bank-wide commitments"
+          variant="brand"
+          iconMotion="float"
         />
         <StatCard
           icon={<CheckCircle2 className="h-5 w-5" />}
@@ -212,7 +255,8 @@ export default function Dashboard() {
           value={`${summary.onTimeRate ?? "—"}%`}
           tone={rateCompliant ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}
           subtext={rateCompliant ? "Target met (≥85%)" : "Below target (<85%)"}
-          highlight={rateCompliant}
+          variant={rateCompliant ? "success" : "warning"}
+          iconMotion="spin"
         />
         <StatCard
           icon={<TrendingUp className="h-5 w-5" />}
@@ -220,31 +264,37 @@ export default function Dashboard() {
           value={summary.completedOnTime}
           tone="text-emerald-600 dark:text-emerald-400"
           subtext="Delivered successfully"
+          variant="success"
+          iconMotion="float"
         />
         <StatCard
           icon={<Clock3 className="h-5 w-5" />}
-          label="Due in 14 Days"
-          value={summary.dueWithin14Days}
+          label="Pending Verification"
+          value={summary.pendingVerificationCount ?? summary.statusDistribution?.PENDING_VERIFICATION ?? 0}
           tone="text-amber-600 dark:text-amber-400"
-          subtext="Near-term attention"
+          subtext="Awaiting officer sign-off"
+          variant="warning"
+          iconMotion="pulse"
         />
         <StatCard
           icon={<AlertTriangle className="h-5 w-5" />}
-          label="Overdue Actions"
+          label="Overdue"
           value={summary.overdue}
           tone={summary.overdue > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}
           subtext={summary.overdue > 0 ? "Requires escalation" : "No overdue items"}
+          variant={summary.overdue > 0 ? "danger" : "success"}
+          iconMotion={summary.overdue > 0 ? "pulse" : "float"}
         />
         <StatCard
           icon={<ShieldCheck className="h-5 w-5" />}
-          label="Pending Sign-off"
-          value={summary.pendingVerificationCount ?? 0}
-          tone="text-blue-600 dark:text-blue-400"
-          subtext="Awaiting verification"
+          label="Due in 14 Days"
+          value={summary.dueWithin14Days}
+          subtext="Upcoming deadlines"
+          variant="info"
+          iconMotion="spin"
         />
       </div>
 
-      {/* Two-Column Middle Section: Governance Matrix & Analytics */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Cross-Committee Governance Leaderboard (2 cols) */}
         <div className="card lg:col-span-2 flex flex-col justify-between">
@@ -284,7 +334,7 @@ export default function Dashboard() {
                   {filteredCommittees.map((c) => {
                     const hasOverdue = c.overdueActions > 0;
                     return (
-                      <tr key={c.committeeId} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                      <tr key={c.committeeId} className="transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
                         <td className="py-3 font-medium text-slate-800 dark:text-slate-200">
                           <div>
                             <span className="font-semibold text-ink dark:text-white">{c.committeeName}</span>
@@ -460,15 +510,12 @@ export default function Dashboard() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700 dark:divide-slate-800">
               {filteredUrgentActions.map((a: UrgentDashboardAction) => (
-                <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
+                <tr key={a.id} className="transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <td className="py-3">
                     <button
                       onClick={() => setSelectedActionId(a.id)}
-                      className="text-left font-semibold text-ink dark:text-slate-100 hover:text-brand-600 dark:hover:text-brand-400 transition"
+                      className="text-left font-semibold text-ink transition hover:text-brand-600 dark:text-slate-100 dark:hover:text-brand-400"
                     >
-                      <span className="font-mono text-xs text-slate-500 dark:text-slate-400 mr-1.5">
-                        {a.referenceNo}
-                      </span>
                       {a.title}
                     </button>
                   </td>

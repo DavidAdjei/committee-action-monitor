@@ -13,22 +13,22 @@
 
   /* Theme color `ink` is navy — force light text in dark mode so headings stay readable */
   html.dark .text-ink {
-    color: #f8fafc; /* slate-50 */
+    color: #fafaf9;
   }
 
   /* Native selects / options in dark mode */
   html.dark select,
   html.dark option {
-    color: #f1f5f9;
-    background-color: #334155; /* slate-700 */
+    color: #f5f5f4;
+    background-color: #3f3d3b; /* warm slate-700 */
   }
 
   /* Autofill can force white backgrounds — neutralize in dark mode */
   html.dark input:-webkit-autofill,
   html.dark textarea:-webkit-autofill,
   html.dark select:-webkit-autofill {
-    -webkit-text-fill-color: #f1f5f9;
-    box-shadow: 0 0 0 1000px #334155 inset;
+    -webkit-text-fill-color: #f5f5f4;
+    box-shadow: 0 0 0 1000px #282624 inset;
     transition: background-color 9999s ease-in-out 0s;
   }
 
@@ -60,7 +60,7 @@
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:ring-offset-2 active:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-800/50 dark:hover:text-slate-50 dark:focus-visible:ring-brand-500 dark:focus-visible:ring-offset-slate-900 dark:active:bg-slate-600;
+    @apply transition duration-200 inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:ring-offset-2 active:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-800/50 dark:hover:text-slate-50 dark:focus-visible:ring-brand-500 dark:focus-visible:ring-offset-slate-900 dark:active:bg-slate-600;
   }
   .btn-primary {
     @apply btn border-transparent bg-brand-500 text-white hover:bg-brand-600 hover:text-white active:bg-brand-700 dark:bg-brand-600 dark:hover:bg-brand-500 dark:hover:text-white dark:active:bg-brand-700;
@@ -110,5 +110,130 @@
   /* Icon-only control */
   .icon-btn {
     @apply rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-100 dark:focus-visible:ring-brand-500;
+  }
+}
+
+
+/* Dashboard-only motion (scoped — does not affect modals/layout) */
+@keyframes dash-pop {
+  0% { opacity: 0; transform: scale(0.92) translateY(14px); }
+  70% { opacity: 1; transform: scale(1.02) translateY(0); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes dash-fade-up {
+  0% { opacity: 0; transform: translateY(16px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes dash-border-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes dash-icon-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes dash-icon-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes dash-pulse-ring {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+@keyframes dash-shine {
+  0% { transform: translateX(-130%) skewX(-12deg); }
+  100% { transform: translateX(230%) skewX(-12deg); }
+}
+
+.dash-page > * {
+  animation: dash-fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.dash-page > *:nth-child(1) { animation-delay: 0.02s; }
+.dash-page > *:nth-child(2) { animation-delay: 0.08s; }
+.dash-page > *:nth-child(3) { animation-delay: 0.14s; }
+.dash-page > *:nth-child(4) { animation-delay: 0.2s; }
+.dash-page > *:nth-child(5) { animation-delay: 0.26s; }
+
+.dash-kpi-grid > * {
+  animation: dash-pop 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.dash-kpi-grid > *:nth-child(1) { animation-delay: 0.06s; }
+.dash-kpi-grid > *:nth-child(2) { animation-delay: 0.12s; }
+.dash-kpi-grid > *:nth-child(3) { animation-delay: 0.18s; }
+.dash-kpi-grid > *:nth-child(4) { animation-delay: 0.24s; }
+.dash-kpi-grid > *:nth-child(5) { animation-delay: 0.3s; }
+.dash-kpi-grid > *:nth-child(6) { animation-delay: 0.36s; }
+
+.dash-kpi {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(148, 163, 184, 0.35), rgba(148, 163, 184, 0.08));
+}
+.dash-kpi::before {
+  content: "";
+  position: absolute;
+  inset: -60%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--dash-accent, #f4a623) 55deg,
+    transparent 110deg
+  );
+  animation: dash-border-spin 3.8s linear infinite;
+  opacity: 0.9;
+}
+.dash-kpi[data-v="success"] { --dash-accent: #10b981; }
+.dash-kpi[data-v="warning"] { --dash-accent: #f59e0b; }
+.dash-kpi[data-v="danger"] { --dash-accent: #ef4444; }
+.dash-kpi[data-v="brand"] { --dash-accent: #f4a623; }
+.dash-kpi[data-v="info"] { --dash-accent: #3b82f6; }
+
+.dash-kpi-inner {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  border-radius: 0.7rem;
+  background: #fff;
+  padding: 1rem 1.1rem;
+}
+html.dark .dash-kpi-inner {
+  background: #1c1b1a;
+}
+
+.dash-kpi:hover .dash-shine {
+  animation: dash-shine 0.85s ease forwards;
+}
+.dash-shine {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  transform: translateX(-130%) skewX(-12deg);
+}
+html.dark .dash-shine {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+}
+
+.dash-icon-float { animation: dash-icon-float 2.2s ease-in-out infinite; }
+.dash-icon-spin { animation: dash-icon-spin 7s linear infinite; }
+.dash-icon-pulse { animation: dash-pulse-ring 1.8s ease-in-out infinite; }
+
+.dash-escalation-row {
+  animation: dash-fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-page > *,
+  .dash-kpi-grid > *,
+  .dash-escalation-row,
+  .dash-kpi::before,
+  .dash-icon-float,
+  .dash-icon-spin,
+  .dash-icon-pulse {
+    animation: none !important;
   }
 }

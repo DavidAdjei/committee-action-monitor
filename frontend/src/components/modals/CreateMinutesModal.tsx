@@ -182,8 +182,8 @@ export function CreateMinutesModal({
                 onClick={() => setSource(s.value)}
                 className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
                   source === s.value
-                    ? "border-brand-500 bg-brand-50 text-brand-800 dark:bg-brand-950 dark:text-brand-200"
-                    : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-600"
+                    ? "border-brand-500 bg-brand-50 text-brand-900 dark:border-brand-400 dark:bg-brand-500 dark:text-white"
+                    : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-600 dark:text-slate-300 dark:hover:border-slate-500"
                 }`}
               >
                 {s.label}

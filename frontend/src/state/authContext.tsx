@@ -225,11 +225,11 @@ function EntraAuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(null);
     setDevUserId(null);
     loadedAccountId.current = null;
-    const acc = instance.getActiveAccount() ?? accounts[0];
-    if (acc) {
-      await instance.logoutRedirect({ account: acc });
-    }
-  }, [instance, accounts]);
+    // App-only logout: clear this SPA's MSAL token cache only.
+    // Does not call Entra's end-session endpoint, so Teams/Outlook SSO stays intact.
+    instance.setActiveAccount(null);
+    await instance.clearCache();
+  }, [instance]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

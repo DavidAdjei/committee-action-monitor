@@ -13,7 +13,7 @@ const STATUS_STYLES: Record<ActionStatus, { label: string; className: string; ic
     icon: <CircleDot className="h-3.5 w-3.5" />,
   },
   OVERDUE: {
-    label: "Overdue / Blocked",
+    label: "Overdue",
     className: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-200",
     icon: <AlertTriangle className="h-3.5 w-3.5" />,
   },

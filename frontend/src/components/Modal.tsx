@@ -20,7 +20,6 @@ export function Modal({
 
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
-    // Focus first focusable control in the dialog
     const root = panelRef.current;
     const focusable = root?.querySelector<HTMLElement>(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
@@ -34,7 +33,6 @@ export function Modal({
       }
     };
     document.addEventListener("keydown", onKey);
-    // Prevent background scroll while open
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
@@ -77,7 +75,7 @@ export function Modal({
             className="icon-btn shrink-0"
             aria-label="Close dialog"
           >
-            <X className="h-5 w-5" aria-hidden />
+            <X className="h-5 w-5" />
           </button>
         </div>
         {children}
@@ -88,7 +86,7 @@ export function Modal({
 
 export function ModalActions({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-6 flex flex-col-reverse gap-2 border-t border-slate-100 dark:border-slate-700 pt-4 sm:flex-row sm:justify-end">
+    <div className="mt-6 flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 dark:border-slate-700 sm:flex-row sm:justify-end">
       {children}
     </div>
   );
