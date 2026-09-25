@@ -110,7 +110,15 @@ export const endpoints = {
       agenda?: string;
       teamsRequested?: boolean;
     },
-  ) => api.post<Meeting>(`/committees/${committeeId}/meetings`, data),
+  ) =>
+    api.post<
+      Meeting & {
+        teamsProvisioned?: boolean;
+        teamsOrganizer?: string | null;
+        teamsEventId?: string | null;
+        teamsJoinUrl?: string | null;
+      }
+    >(`/committees/${committeeId}/meetings`, data),
 
   listMeetingMinutes: (meetingId: number) =>
     api.get<MeetingMinutes[]>(`/meetings/${meetingId}/minutes`),

@@ -41,7 +41,7 @@ export function CreateMeetingModal({
     setSubmitting(true);
     setError(null);
     try {
-      await endpoints.createMeeting(committeeId, {
+      const created = await endpoints.createMeeting(committeeId, {
         reference: reference.trim() || undefined,
         title,
         startsAt: new Date(`${date}T${startTime}:00`).toISOString(),
@@ -50,10 +50,15 @@ export function CreateMeetingModal({
         agenda,
         teamsRequested: teams,
       });
+      const provisioned = Boolean(
+        teams && created && typeof created === "object" && (created as { teamsJoinUrl?: string | null }).teamsJoinUrl,
+      );
       flash(
         teams
-          ? "Meeting saved — Microsoft Teams online meeting will be created by the integration worker"
-          : "Meeting created and stakeholders notified",
+          ? provisioned
+            ? "Meeting created with Microsoft Teams join link"
+            : "Meeting saved — Teams link could not be created yet (check Graph config / organizer Teams license). Meeting is still available in CAM."
+          : "Meeting created successfully",
       );
       onCreated();
       onClose();

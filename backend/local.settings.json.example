@@ -6,9 +6,9 @@
     "DATABASE_URL": "mysql://cam_app:changeme@localhost:3306/committee_actions",
     "CORS_ALLOWED_ORIGIN": "http://localhost:5173",
     "DEV_AUTH_ENABLED": "true",
-    "GRAPH_TENANT_ID": "",
-    "GRAPH_CLIENT_ID": "",
-    "GRAPH_CLIENT_SECRET": "",
+    "ENTRA_GRAPH_TENANT_ID": "",
+    "ENTRA_GRAPH_CLIENT_ID": "",
+    "ENTRA_GRAPH_CLIENT_SECRET": "",
     "EVIDENCE_STORAGE_CONNECTION_STRING": "",
     "EVIDENCE_STORAGE_CONTAINER": "evidence"
   },

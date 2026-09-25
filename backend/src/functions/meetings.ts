@@ -10,6 +10,7 @@ import {
   setAttendanceSheetUrl,
   listAttendance,
 } from "../services/meetingService";
+import { tryProvisionTeamsForMeeting } from "../services/teamsMeetingService";
 
 async function listMeetings(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
@@ -61,19 +62,46 @@ async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): 
       throw Errors.badRequest("title and startsAt are required.");
     }
 
+    const startsAt = new Date(body.startsAt);
+    const endsAt = body.endsAt ? new Date(body.endsAt) : undefined;
+    const title = body.title.trim();
+    const teamsRequested = Boolean(body.teamsRequested);
+
     const meeting = await createMeeting({
       committeeId,
       reference: body.reference?.trim() || undefined,
-      title: body.title.trim(),
-      startsAt: new Date(body.startsAt),
-      endsAt: body.endsAt ? new Date(body.endsAt) : undefined,
+      title,
+      startsAt,
+      endsAt,
       venue: body.venue,
       agenda: body.agenda,
-      teamsRequested: body.teamsRequested,
+      teamsRequested,
       createdById: user.id,
     });
 
-    return ok(meeting, 201);
+    // Best-effort Teams online meeting under the creator (Secretary/Chair) as organizer.
+    // Failure does not roll back the CAM meeting; join URL is simply omitted.
+    const teams = await tryProvisionTeamsForMeeting({
+      meetingId: meeting.id,
+      committeeId,
+      title,
+      startsAt,
+      endsAt,
+      createdById: user.id,
+      agenda: body.agenda,
+      teamsRequested,
+    });
+
+    return ok(
+      {
+        ...meeting,
+        teamsEventId: teams?.teamsEventId ?? meeting.teamsEventId,
+        teamsJoinUrl: teams?.teamsJoinUrl ?? meeting.teamsJoinUrl,
+        teamsProvisioned: Boolean(teams?.teamsJoinUrl),
+        teamsOrganizer: teams?.organizerUpn ?? null,
+      },
+      201,
+    );
   } catch (err) {
     if (err instanceof ApiError && err.status === 403) {
       await recordDenied({

@@ -56,8 +56,8 @@ export async function generateMeetingReference(
  * Mirrors "Create a meeting": the caller's officer status for this committee
  * must already have been checked by requireCommitteeOfficer() before this
  * runs. If reference is not provided, it is automatically generated on the backend.
- * If Teams is requested, the Graph call to create the online meeting
- * is a separate integration step (see services/graphService.ts).
+ * If Teams is requested, the HTTP handler provisions a Graph online meeting
+ * after this returns (see services/teamsMeetingService.ts) and stores the join URL.
  */
 export async function createMeeting(input: CreateMeetingInput) {
   const maxAttempts = 5;

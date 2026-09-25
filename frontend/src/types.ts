@@ -64,7 +64,11 @@ export interface Meeting {
   venue: string | null;
   agenda: string | null;
   teamsRequested: boolean;
+  teamsEventId?: string | null;
   teamsJoinUrl: string | null;
+  /** Present on create response when Graph provision succeeded */
+  teamsProvisioned?: boolean;
+  teamsOrganizer?: string | null;
 }
 
 export interface CommitteeDetail {

@@ -2,9 +2,8 @@
  * Microsoft Graph directory sync (application permissions).
  * Lists tenant users and upserts them into the local User table.
  *
- * Required app permission (admin consent): User.ReadBasic.All
- * (Works with the limited basic profile — id, displayName, mail, UPN.
- *  Does not read department or accountEnabled; those need User.Read.All.)
+ * Required app permission (admin consent): User.Read.All
+ * Reads department, accountEnabled, userType; skips disabled and guests.
  *
  * Auth: client credentials (app-only).
  *
@@ -12,6 +11,9 @@
  *   ENTRA_GRAPH_TENANT_ID / GRAPH_TENANT_ID
  *   ENTRA_GRAPH_CLIENT_ID  / GRAPH_CLIENT_ID
  *   ENTRA_GRAPH_CLIENT_SECRET / GRAPH_CLIENT_SECRET
+ *
+ * Optional:
+ *   GRAPH_SYNC_EXCLUDE_PREFIXES=svc-,sa-,noreply,app-   (comma-separated local-part prefixes)
  */
 import { prisma } from "./prisma";
 import { Errors } from "./http";
@@ -21,6 +23,9 @@ type GraphUser = {
   displayName?: string;
   mail?: string | null;
   userPrincipalName?: string;
+  department?: string | null;
+  accountEnabled?: boolean;
+  userType?: string | null;
 };
 
 function env(name: string, aliases: string[] = []): string | undefined {
@@ -38,6 +43,15 @@ function graphConfigured(): boolean {
       env("ENTRA_GRAPH_CLIENT_ID", ["GRAPH_CLIENT_ID"]) &&
       env("ENTRA_GRAPH_CLIENT_SECRET", ["GRAPH_CLIENT_SECRET"]),
   );
+}
+
+function excludePrefixes(): string[] {
+  const raw = env("GRAPH_SYNC_EXCLUDE_PREFIXES", ["ENTRA_GRAPH_SYNC_EXCLUDE_PREFIXES"]);
+  if (!raw) return ["svc-", "sa-", "noreply", "no-reply", "app-", "sp-"];
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 async function getAppToken(): Promise<string> {
@@ -67,23 +81,31 @@ async function getAppToken(): Promise<string> {
 }
 
 /**
- * List users using only properties allowed by User.ReadBasic.All.
- * No $filter on accountEnabled / department — those require User.Read.All.
+ * List enabled member users (User.Read.All).
+ * Filter: accountEnabled eq true and userType eq 'Member'
+ * Advanced query requires ConsistencyLevel: eventual + $count=true.
  */
 async function listAllGraphUsers(accessToken: string): Promise<GraphUser[]> {
-  const select = "$select=id,displayName,mail,userPrincipalName";
-  let url: string | null = `https://graph.microsoft.com/v1.0/users?${select}&$top=100`;
+  const select =
+    "$select=id,displayName,mail,userPrincipalName,department,accountEnabled,userType";
+  const filter = "$filter=accountEnabled eq true and userType eq 'Member'";
+  // $count=true required with ConsistencyLevel eventual for this filter combination
+  let url: string | null =
+    `https://graph.microsoft.com/v1.0/users?${select}&${filter}&$count=true&$top=100`;
 
   const out: GraphUser[] = [];
   while (url) {
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ConsistencyLevel: "eventual",
+      },
     });
     if (!res.ok) {
       const t = await res.text();
       throw Errors.badRequest(
         `Graph users list failed: ${res.status} ${t.slice(0, 300)}. ` +
-          `Ensure the app has Application permission User.ReadBasic.All with admin consent.`,
+          `Ensure the app has Application permission User.Read.All with admin consent.`,
       );
     }
     const json = (await res.json()) as { value?: GraphUser[]; "@odata.nextLink"?: string };
@@ -98,13 +120,16 @@ function emailOf(u: GraphUser): string | null {
   return raw.includes("@") ? raw : null;
 }
 
+/** Drop obvious service / system accounts by local-part prefix. */
+function isLikelyServiceAccount(email: string): boolean {
+  const local = email.split("@")[0] ?? "";
+  return excludePrefixes().some((p) => local.startsWith(p));
+}
+
 /**
  * Upsert Graph users into local DB.
  * Match order: entraObjectId → email → create new.
  * Does not delete local users missing from Graph.
- *
- * With User.ReadBasic.All: department is left unchanged on update / null on create;
- * active defaults to true (disabled accounts cannot be detected).
  */
 export async function syncUsersFromEntra(): Promise<{
   created: number;
@@ -131,14 +156,26 @@ export async function syncUsersFromEntra(): Promise<{
       skipped += 1;
       continue;
     }
+    if (isLikelyServiceAccount(email)) {
+      skipped += 1;
+      continue;
+    }
+    // Defence in depth if Graph filter was ignored
+    if (g.accountEnabled === false || (g.userType && g.userType.toLowerCase() === "guest")) {
+      skipped += 1;
+      continue;
+    }
+
     const fullName = (g.displayName || email.split("@")[0]).trim();
+    const department = g.department ?? null;
+    // After the skip above, remaining users are enabled (or accountEnabled omitted)
+    const active = true;
 
     const byOid = await prisma.user.findUnique({ where: { entraObjectId: g.id } });
     if (byOid) {
-      // Preserve existing department / active — basic profile does not supply them
       await prisma.user.update({
         where: { id: byOid.id },
-        data: { fullName, email },
+        data: { fullName, email, department, active },
       });
       updated += 1;
       continue;
@@ -151,6 +188,8 @@ export async function syncUsersFromEntra(): Promise<{
         data: {
           entraObjectId: byEmail.entraObjectId ?? g.id,
           fullName,
+          department,
+          active,
         },
       });
       updated += 1;
@@ -162,8 +201,8 @@ export async function syncUsersFromEntra(): Promise<{
         entraObjectId: g.id,
         fullName,
         email,
-        department: null,
-        active: true,
+        department,
+        active,
         isCentralCommittee: false,
         isAdmin: false,
       },
