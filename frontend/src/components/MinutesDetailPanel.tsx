@@ -1,21 +1,18 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Download, ExternalLink, FileText, Loader2, Send } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { Modal, ModalActions } from "@/components/Modal";
 import { StatusPill, formatDate } from "@/components/StatusBits";
 import { endpoints } from "@/api/endpoints";
 import { ApiClientError } from "@/api/client";
-import { useAuth } from "@/state/authContext";
 import { useFlash } from "@/state/toastContext";
-import { canCreateMinutes } from "@/lib/permissions";
+import { PreviewMinutesButton } from "@/components/MinutesDocumentPreview";
 import type { MeetingMinutes } from "@/types";
 
 function statusBadge(status: string) {
   switch (status) {
     case "DRAFT":
       return "bg-slate-100 text-slate-700 dark:text-slate-200 border-slate-200 dark:bg-slate-800 dark:text-slate-300";
-    case "ISSUED":
-      return "bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-950 dark:text-blue-300";
-    case "APPROVED":
+    case "FINAL":
       return "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300";
     default:
       return "bg-slate-100 text-slate-600";
@@ -31,55 +28,19 @@ export function MinutesDetailPanel({
   onClose: () => void;
   onChanged: () => void;
 }) {
-  const { me } = useAuth();
   const flash = useFlash();
   const [detail, setDetail] = useState<MeetingMinutes | null>(null);
   const [busy, setBusy] = useState(false);
-  const [documentUrl, setDocumentUrl] = useState("");
-  const [attendanceList, setAttendanceList] = useState<{ fullName: string; method: string }[]>([]);
-  const [showMailPreview, setShowMailPreview] = useState(false);
-  const [mailPreview, setMailPreview] = useState<{
-    subject: string;
-    htmlBody: string;
-    textBody: string;
-    recipientCount: number;
-    attachments: { filename: string; contentType: string }[];
-  } | null>(null);
-  const [mailPreviewLoading, setMailPreviewLoading] = useState(false);
-  const [showAttendance, setShowAttendance] = useState(false);
-
-  const load = () =>
-    endpoints.getMinutes(minutesId).then(async (d) => {
-      setDetail(d);
-      setDocumentUrl(d.documentUrl ?? "");
-      try {
-        const m: any = await endpoints.meetingDetail(d.meetingId);
-        setAttendanceList(
-          (m.attendance ?? []).map((a: any) => ({ fullName: a.fullName, method: a.method })),
-        );
-      } catch {
-        setAttendanceList([]);
-      }
-    });
 
   useEffect(() => {
-    load().catch((err: unknown) => {
-      flash(err instanceof ApiClientError ? err.message : "Could not load minutes.", "error");
-      onClose();
-    });
+    void endpoints
+      .getMinutes(minutesId)
+      .then(setDetail)
+      .catch((err: unknown) => {
+        flash(err instanceof ApiClientError ? err.message : "Could not load minutes.", "error");
+        onClose();
+      });
   }, [minutesId]);
-
-  const download = async () => {
-    try {
-      setBusy(true);
-      await endpoints.exportMinutes(minutesId);
-      flash("Minutes document downloaded");
-    } catch (err: unknown) {
-      flash(err instanceof ApiClientError ? err.message : "Could not download minutes.", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   if (!detail) {
     return (
@@ -91,54 +52,17 @@ export function MinutesDetailPanel({
     );
   }
 
-  const canManage = canCreateMinutes(me, detail.meeting.committeeId);
-
-  const issue = async () => {
-    setBusy(true);
-    try {
-      const updated = await endpoints.issueMinutes(detail.id, {
-        documentUrl: documentUrl.trim() || undefined,
-      });
-      setDetail(updated);
-      flash("Minutes issued — Word minutes + attendance CSV attached to stakeholder email");
-      onChanged();
-    } catch (err: unknown) {
-      flash(err instanceof ApiClientError ? err.message : "Could not issue minutes.", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const approve = async () => {
-    setBusy(true);
-    try {
-      const updated = await endpoints.approveMinutes(detail.id);
-      setDetail(updated);
-      flash("Minutes approved");
-      onChanged();
-    } catch (err: unknown) {
-      flash(err instanceof ApiClientError ? err.message : "Could not approve minutes.", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <Modal
-      title={`Minutes · ${detail.meeting.reference}`}
-      subtitle={detail.meeting.title}
-      onClose={onClose}
-      wide
-    >
+    <Modal title={`Minutes · ${detail.meeting.reference}`} subtitle={detail.meeting.title} onClose={onClose} wide>
       <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${statusBadge(detail.status)}`}>
+          <span
+            className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${statusBadge(detail.status)}`}
+          >
             {detail.status}
           </span>
           <div className="text-xs text-slate-500">
             Created by {detail.createdBy.fullName} · {formatDate(detail.createdAt)}
-            {detail.issuedAt && <> · Issued {formatDate(detail.issuedAt)}</>}
-            {detail.approvedAt && <> · Approved {formatDate(detail.approvedAt)}</>}
           </div>
         </div>
 
@@ -150,219 +74,79 @@ export function MinutesDetailPanel({
             </b>
           </div>
           <div>
-            <small className="block text-slate-400">Action status source</small>
-            <b>{String(detail.sourcePopulation).replace(/_/g, " ")}</b>
+            <small className="block text-slate-400">Document</small>
+            <b>{detail.filename ?? (detail.hasFile ? "Uploaded file" : "No file attached")}</b>
+            {detail.sizeBytes != null && (
+              <span className="ml-1 text-xs text-slate-400">({Math.round(detail.sizeBytes / 1024)} KB)</span>
+            )}
           </div>
-        </div>
-
-        <div>
-          <div className="mb-1.5 flex flex-wrap items-center gap-2">
-            <b className="text-sm text-slate-800 dark:text-slate-100">Attendance</b>
-            <button
-              type="button"
-              className="btn text-xs py-1"
-              onClick={() => setShowAttendance((v) => !v)}
-            >
-              {showAttendance ? "Hide attendance" : "View attendance"}
-              <span className="text-slate-400">({attendanceList.length})</span>
-            </button>
-          </div>
-          {showAttendance && (
-            attendanceList.length === 0 ? (
-              <p className="text-sm text-slate-400">No attendance recorded for this meeting.</p>
-            ) : (
-              <ul className="mb-1 list-inside list-disc text-sm text-slate-600 dark:text-slate-300">
-                {attendanceList.map((a, i) => (
-                  <li key={i}>
-                    {a.fullName} <span className="text-xs text-slate-400">({a.method})</span>
-                  </li>
-                ))}
-              </ul>
-            )
-          )}
         </div>
 
         {detail.discussion && (
           <div>
-            <b className="mb-1.5 block text-sm text-slate-800 dark:text-slate-100">
-              Discussion, decisions & resolutions
-            </b>
-            <div className="whitespace-pre-wrap rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+            <b className="mb-1.5 block text-sm text-slate-800 dark:text-slate-100">Discussion</b>
+            <p className="whitespace-pre-wrap rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700">
               {detail.discussion}
-            </div>
+            </p>
           </div>
         )}
 
-        <div>
-          <b className="mb-1.5 block text-sm text-slate-800 dark:text-slate-100">
-            Action points ({detail.snapshots.length})
-          </b>
-          <p className="mb-2 text-xs text-slate-400">
-            Captured when the minutes were created. Later changes to live actions do not alter these rows.
-          </p>
-          <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-            <table className="w-full min-w-[520px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400 dark:border-slate-700">
-                  <th className="px-3 py-2">Reference</th>
-                  <th className="px-3 py-2">Action</th>
-                  <th className="px-3 py-2">Owner</th>
-                  <th className="px-3 py-2">Progress</th>
-                  <th className="px-3 py-2">Status at capture</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detail.snapshots.map((s) => (
-                  <tr key={s.actionPointId} className="border-b border-slate-100 dark:border-slate-700 last:border-0 dark:border-slate-800">
-                    <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200">{s.referenceNo}</td>
-                    <td className="px-3 py-2">
-                      <div>{s.title}</div>
-                      {s.ownerRemarks && (
-                        <small className="text-slate-400 italic">"{s.ownerRemarks}"</small>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{s.owner.fullName}</td>
-                    <td className="px-3 py-2">{s.progressPercent}%</td>
-                    <td className="px-3 py-2">
-                      <StatusPill status={s.actionStatus as any} />
-                    </td>
-                  </tr>
-                ))}
-                {detail.snapshots.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-3 py-6 text-center text-slate-400">
-                      No action snapshots were included.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+        {detail.snapshots && detail.snapshots.length > 0 && (
+          <div>
+            <b className="mb-1.5 block text-sm text-slate-800 dark:text-slate-100">
+              Linked actions at import ({detail.snapshots.length})
+            </b>
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 dark:divide-slate-700 dark:border-slate-700">
+              {detail.snapshots.map((s) => (
+                <li key={s.actionPointId} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                  <span>
+                    <b>
+                      {s.referenceNo} · {s.title}
+                    </b>
+                    <span className="block text-xs text-slate-400">
+                      {s.owner.fullName} · {s.progressPercent}%
+                    </span>
+                  </span>
+                  <StatusPill status={s.actionStatus as any} />
+                </li>
+              ))}
+            </ul>
           </div>
-        </div>
-
-        <div>
-          <b className="mb-1.5 block text-sm text-slate-800 dark:text-slate-100">Minutes document</b>
-          {detail.status === "DRAFT" && canManage ? (
-            <label className="field-label">
-              Document URL (SharePoint or controlled link)
-              <input
-                type="url"
-                className="field-input"
-                placeholder="https://…"
-                value={documentUrl}
-                onChange={(e) => setDocumentUrl(e.target.value)}
-              />
-              <small className="font-normal text-slate-400">
-                Optional. Stored on issue. Word/PDF generation via Graph can attach here later.
-              </small>
-            </label>
-          ) : detail.documentUrl ? (
-            <a
-              href={detail.documentUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 dark:text-brand-300 hover:underline"
-            >
-              <ExternalLink className="h-4 w-4" /> Open minutes document
-            </a>
-          ) : (
-            <p className="text-sm text-slate-400">No document link attached.</p>
-          )}
-        </div>
+        )}
       </div>
 
-      <button
-        type="button"
-        className="mt-4 text-xs font-semibold text-brand-700 dark:text-brand-300 hover:underline"
-        onClick={() => {
-          setShowMailPreview((v) => {
-            const next = !v;
-            if (next && !mailPreview) {
-              setMailPreviewLoading(true);
-              endpoints
-                .minutesMailPreview(minutesId)
-                .then((p) =>
-                  setMailPreview({
-                    subject: p.subject,
-                    htmlBody: p.htmlBody,
-                    textBody: p.textBody,
-                    recipientCount: p.recipientCount,
-                    attachments: p.attachments.map((a) => ({
-                      filename: a.filename,
-                      contentType: a.contentType,
-                    })),
-                  }),
-                )
-                .catch((err: unknown) =>
-                  flash(
-                    err instanceof ApiClientError ? err.message : "Could not load email preview.",
-                    "error",
-                  ),
-                )
-                .finally(() => setMailPreviewLoading(false));
-            }
-            return next;
-          });
-        }}
-      >
-        {showMailPreview ? "Hide" : "Show"} email layout preview
-      </button>
-      {showMailPreview && (
-        <div className="mt-2 rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm dark:border-slate-600 dark:bg-slate-900">
-          {mailPreviewLoading && (
-            <p className="flex items-center gap-2 text-xs text-slate-500">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading mail preview…
-            </p>
-          )}
-          {mailPreview && !mailPreviewLoading && (
-            <>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                Subject · {mailPreview.recipientCount} recipient
-                {mailPreview.recipientCount === 1 ? "" : "s"}
-              </p>
-              <p className="mb-2 font-semibold text-slate-800 dark:text-slate-100">{mailPreview.subject}</p>
-              {mailPreview.attachments.length > 0 && (
-                <p className="mb-2 text-[11px] text-slate-500">
-                  Attachments:{" "}
-                  {mailPreview.attachments.map((a) => a.filename).join(", ")}
-                </p>
-              )}
-              <div
-                className="max-h-64 overflow-auto rounded border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-950"
-                dangerouslySetInnerHTML={{ __html: mailPreview.htmlBody }}
-              />
-            </>
-          )}
-          {!mailPreview && !mailPreviewLoading && (
-            <p className="text-xs text-slate-500">Preview unavailable.</p>
-          )}
-        </div>
-      )}
-
       <ModalActions>
+        {detail.hasFile && (
+          <>
+            <PreviewMinutesButton
+              minutesId={detail.id}
+              filename={detail.filename}
+              mediaType={detail.mediaType}
+              hasFile
+              className="btn gap-1.5"
+            />
+            <button
+              type="button"
+              className="btn gap-1.5"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void endpoints
+                  .downloadMinutesDocument(detail.id, detail.filename ?? undefined)
+                  .then(() => flash("Minutes document downloaded"))
+                  .catch((err: unknown) =>
+                    flash(err instanceof ApiClientError ? err.message : "Download failed.", "error"),
+                  )
+                  .finally(() => setBusy(false));
+              }}
+            >
+              <Download className="h-4 w-4" /> Download document
+            </button>
+          </>
+        )}
         <button type="button" className="btn" onClick={onClose}>
           Close
         </button>
-        <button type="button" className="btn" disabled={busy} onClick={() => void download()}>
-          <Download className="h-4 w-4" /> Download Word
-        </button>
-        {canManage && detail.status === "DRAFT" && (
-          <button type="button" className="btn-primary" disabled={busy} onClick={issue}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            Issue & notify
-          </button>
-        )}
-        {canManage && detail.status === "ISSUED" && (
-          <button type="button" className="btn-primary" disabled={busy} onClick={approve}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-            Approve minutes
-          </button>
-        )}
-        {detail.status === "APPROVED" && (
-          <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
-            <FileText className="h-3.5 w-3.5" /> Approved — snapshots are locked
-          </span>
-        )}
       </ModalActions>
     </Modal>
   );

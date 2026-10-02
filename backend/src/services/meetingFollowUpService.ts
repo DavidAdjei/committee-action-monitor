@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { triggerEmailDispatchAsync } from "./notificationService";
 
 /**
  * Post-meeting secretary follow-ups (email + in-app):
@@ -128,5 +129,6 @@ export async function runMeetingFollowUpReminders(now = new Date()): Promise<{
     });
   }
 
+  triggerEmailDispatchAsync();
   return { actionsReminders, minutesReminders };
 }

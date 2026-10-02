@@ -271,8 +271,9 @@ function collectUsers(): Map<string, UserSeed> {
     if (CENTRAL_COMMITTEE_EMAILS.has(key)) {
       u.isCentralCommittee = true;
       if (key === CENTRAL_ADMIN_EMAIL) {
+        // Central Committee Administrator — governance only (not platform isAdmin)
         u.centralRole = "ADMINISTRATOR";
-        u.isAdmin = true;
+        u.isAdmin = false;
       } else {
         u.centralRole = "MEMBER";
         u.isAdmin = false;

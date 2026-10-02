@@ -76,14 +76,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   get: <T>(path: string) => request<T>(path, { method: "GET" }),
-  post: <T>(path: string, data?: unknown) =>
-    request<T>(path, { method: "POST", body: data !== undefined ? JSON.stringify(data) : undefined }),
+  post: <T>(path: string, data?: unknown, init?: RequestInit) =>
+    request<T>(path, {
+      method: "POST",
+      body: data !== undefined ? JSON.stringify(data) : undefined,
+      ...init,
+      headers: {
+        ...((init?.headers as Record<string, string>) ?? {}),
+      },
+    }),
   postForm: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
   patch: <T>(path: string, data?: unknown) =>
     request<T>(path, { method: "PATCH", body: data !== undefined ? JSON.stringify(data) : undefined }),
   delete: <T>(path: string, data?: unknown) =>
     request<T>(path, { method: "DELETE", body: data !== undefined ? JSON.stringify(data) : undefined }),
-  download: async (path: string, fallbackFilename = "download"): Promise<void> => {
+  /** Fetch a file as a Blob (for in-app preview). Does not trigger a download. */
+  fetchBlob: async (
+    path: string,
+  ): Promise<{ blob: Blob; contentType: string; filename: string | null }> => {
     const devUserId = getDevUserId();
     const bearer = getAccessToken();
     const headers: Record<string, string> = {
@@ -104,12 +114,12 @@ export const api = {
         } catch {
           // ignore
         }
-        if (res.status === 403) errMsg = errMsg || "You are not authorized to download this file.";
+        if (res.status === 403) errMsg = errMsg || "You are not authorized to access this file.";
         throw new ApiClientError(res.status, code, errMsg);
       }
 
       const blob = await res.blob();
-      let filename = fallbackFilename;
+      let filename: string | null = null;
       const disposition = res.headers.get("content-disposition");
       if (disposition) {
         const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]*)["']?/i);
@@ -117,17 +127,23 @@ export const api = {
           filename = decodeURIComponent(match[1]);
         }
       }
-
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      const contentType =
+        res.headers.get("content-type") || blob.type || "application/octet-stream";
+      return { blob, contentType, filename };
     } finally {
       useLoadingStore.getState().stopRequest();
     }
+  },
+  download: async (path: string, fallbackFilename = "download"): Promise<void> => {
+    const { blob, filename } = await api.fetchBlob(path);
+    const name = filename || fallbackFilename;
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
   },
 };

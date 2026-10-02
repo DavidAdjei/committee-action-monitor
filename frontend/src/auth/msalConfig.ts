@@ -98,6 +98,16 @@ export function getTokenRequest(): RedirectRequest {
   return getLoginRequest();
 }
 
+/** Delegated Graph scopes for interactive Teams meeting create. */
+export const graphTeamsScopes = [
+  "https://graph.microsoft.com/OnlineMeetings.ReadWrite",
+];
+
+export function getGraphTeamsTokenRequest(): RedirectRequest {
+  return { scopes: [...graphTeamsScopes] };
+}
+
+
 export function getMsalConfig(): Configuration {
   if (!clientId || !tenantId) {
     throw new Error(

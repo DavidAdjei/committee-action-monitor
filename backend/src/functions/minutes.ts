@@ -3,16 +3,13 @@ import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
 import { requireCommitteeOfficer, requireViewCommittee } from "../lib/authorize";
 import { ok, errorResponse, preflight, Errors, corsHeaders } from "../lib/http";
-import {
-  createDraftMinutes,
-  issueMinutes,
-  approveMinutes,
-  getMinutesDetail,
-  listMinutesForMeeting,
-  getMinutesIssuedMailPayload,
-} from "../services/minutesService";
+import { getMinutesDetail, listMinutesForMeeting } from "../services/minutesService";
 import { importMinutesWithActions } from "../services/minutesImportService";
-import { buildMinutesDocx } from "../services/minutesDocumentService";
+import {
+  uploadMinutesDocument,
+  downloadMinutesDocument,
+} from "../services/minutesDocumentService.upload";
+import { EvidenceValidationError } from "../services/storageService";
 
 async function listMinutesForMeetingHandler(
   req: HttpRequest,
@@ -35,42 +32,14 @@ async function listMinutesForMeetingHandler(
   }
 }
 
-async function createMinutesHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+async function handleMinutesForMeeting(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
-  try {
-    const user = await requireUser(req);
-    const meetingId = Number(req.params.id);
-    if (!Number.isInteger(meetingId)) throw Errors.badRequest("Invalid meeting id.");
-
-    const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
-    if (!meeting) throw Errors.notFound("Meeting");
-    await requireCommitteeOfficer(user, meeting.committeeId);
-
-    const body = (await req.json()) as {
-      sourcePopulation?: "LATEST_MEETING" | "PREVIOUS_MEETING" | "ALL_OPEN_ACTIONS";
-      discussion?: string;
-      includedActionPointIds?: number[];
-      documentUrl?: string;
-    };
-    if (!body.discussion || !body.includedActionPointIds?.length) {
-      throw Errors.badRequest("discussion and includedActionPointIds are required.");
-    }
-
-    const minutes = await createDraftMinutes({
-      meetingId,
-      sourcePopulation: body.sourcePopulation ?? "LATEST_MEETING",
-      discussion: body.discussion,
-      includedActionPointIds: body.includedActionPointIds,
-      createdById: user.id,
-      documentUrl: body.documentUrl,
-    });
-
-    // Return full detail so the UI can show snapshots immediately
-    const detail = await getMinutesDetail(minutes.id);
-    return ok(detail, 201);
-  } catch (err) {
-    return errorResponse(err);
-  }
+  if (req.method === "GET") return listMinutesForMeetingHandler(req, _ctx);
+  return errorResponse(
+    Errors.badRequest(
+      "Creating minutes inline is no longer supported. Use Import minutes or upload a draft/final document.",
+    ),
+  );
 }
 
 async function getMinutesHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
@@ -94,105 +63,6 @@ async function getMinutesHandler(req: HttpRequest, _ctx: InvocationContext): Pro
   }
 }
 
-async function issueMinutesHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
-  if (req.method === "OPTIONS") return preflight();
-  try {
-    const user = await requireUser(req);
-    const minutesId = Number(req.params.minutesId);
-    if (!Number.isInteger(minutesId)) throw Errors.badRequest("Invalid minutes id.");
-
-    const minutes = await prisma.meetingMinutes.findUnique({
-      where: { id: minutesId },
-      include: { meeting: true },
-    });
-    if (!minutes) throw Errors.notFound("Minutes");
-    await requireCommitteeOfficer(user, minutes.meeting.committeeId);
-
-    const body = (await req.json().catch(() => ({}))) as { documentUrl?: string };
-    await issueMinutes(minutesId, user.id, body.documentUrl);
-    const detail = await getMinutesDetail(minutesId);
-    // Mail payload includes attendance CSV as an attachment for the delivery worker / UI notice
-    let mail: { subject: string; attachmentNames: string[] } | null = null;
-    try {
-      const payload = await getMinutesIssuedMailPayload(minutesId);
-      mail = {
-        subject: payload.subject,
-        attachmentNames: payload.attachments.map((a) => a.filename),
-      };
-    } catch {
-      mail = null;
-    }
-    return ok({ ...detail, mail });
-  } catch (err) {
-    return errorResponse(err);
-  }
-}
-
-async function minutesMailPreviewHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
-  if (req.method === "OPTIONS") return preflight();
-  try {
-    const user = await requireUser(req);
-    const minutesId = Number(req.params.minutesId);
-    if (!Number.isInteger(minutesId)) throw Errors.badRequest("Invalid minutes id.");
-
-    const existing = await prisma.meetingMinutes.findUnique({
-      where: { id: minutesId },
-      include: { meeting: true },
-    });
-    if (!existing) throw Errors.notFound("Minutes");
-    await requireViewCommittee(user, existing.meeting.committeeId);
-
-    const payload = await getMinutesIssuedMailPayload(minutesId);
-    return ok({
-      subject: payload.subject,
-      htmlBody: payload.htmlBody,
-      textBody: payload.textBody,
-      attachments: payload.attachments.map((a) => ({
-        filename: a.filename,
-        contentType: a.contentType,
-        /** Inline content for download/preview; Graph worker base64-encodes this */
-        content: a.content,
-        encoding: a.encoding,
-      })),
-      recipientCount: payload.recipientUserIds.length,
-    });
-  } catch (err) {
-    return errorResponse(err);
-  }
-}
-
-async function approveMinutesHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
-  if (req.method === "OPTIONS") return preflight();
-  try {
-    const user = await requireUser(req);
-    const minutesId = Number(req.params.minutesId);
-    if (!Number.isInteger(minutesId)) throw Errors.badRequest("Invalid minutes id.");
-
-    const minutes = await prisma.meetingMinutes.findUnique({
-      where: { id: minutesId },
-      include: { meeting: true },
-    });
-    if (!minutes) throw Errors.notFound("Minutes");
-    await requireCommitteeOfficer(user, minutes.meeting.committeeId);
-
-    await approveMinutes(minutesId, user.id);
-    const detail = await getMinutesDetail(minutesId);
-    return ok(detail);
-  } catch (err) {
-    return errorResponse(err);
-  }
-}
-
-async function handleMinutesForMeeting(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
-  if (req.method === "OPTIONS") return preflight();
-
-  if (req.method === "GET") return listMinutesForMeetingHandler(req, _ctx);
-  if (req.method === "POST") return createMinutesHandler(req, _ctx);
-
-  return errorResponse(new Error("Method not allowed"));
-}
-
-
 async function importMinutesHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
   try {
@@ -206,9 +76,8 @@ async function importMinutesHandler(req: HttpRequest, _ctx: InvocationContext): 
 
     const body = (await req.json()) as {
       discussion?: string;
-      documentUrl?: string;
-      sourcePopulation?: "LATEST_MEETING" | "PREVIOUS_MEETING" | "ALL_OPEN_ACTIONS";
       actionsOnly?: boolean;
+      replaceExisting?: boolean;
       actions?: {
         title: string;
         description?: string;
@@ -227,11 +96,10 @@ async function importMinutesHandler(req: HttpRequest, _ctx: InvocationContext): 
     const result = await importMinutesWithActions({
       meetingId,
       discussion: body.discussion ?? "",
-      documentUrl: body.documentUrl,
-      sourcePopulation: body.sourcePopulation,
       actions: body.actions,
       createdById: user.id,
       actionsOnly: Boolean(body.actionsOnly),
+      replaceExisting: Boolean(body.replaceExisting),
     });
 
     return ok(
@@ -250,8 +118,67 @@ async function importMinutesHandler(req: HttpRequest, _ctx: InvocationContext): 
   }
 }
 
+async function uploadMinutesDocumentHandler(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const meetingId = Number(req.params.id);
+    if (!Number.isInteger(meetingId)) throw Errors.badRequest("Invalid meeting id.");
 
-async function exportMinutesHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+    const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!meeting) throw Errors.notFound("Meeting");
+    await requireCommitteeOfficer(user, meeting.committeeId);
+
+    const form = await req.formData();
+    const file = form.get("file");
+    const statusRaw = String(form.get("status") ?? "DRAFT").toUpperCase();
+    const discussion = form.get("discussion");
+    if (!file || typeof file === "string") throw Errors.badRequest("A file field is required.");
+    if (statusRaw !== "DRAFT" && statusRaw !== "FINAL") {
+      throw Errors.badRequest("status must be DRAFT or FINAL.");
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const row = await uploadMinutesDocument({
+      meetingId,
+      actorUserId: user.id,
+      status: statusRaw,
+      filename: file.name,
+      mediaType: file.type || "application/octet-stream",
+      buffer,
+      discussion: typeof discussion === "string" ? discussion : undefined,
+    });
+
+    return ok(
+      {
+        id: row.id,
+        meetingId: row.meetingId,
+        status: row.status,
+        filename: row.filename,
+        mediaType: row.mediaType,
+        sizeBytes: row.sizeBytes,
+        hasFile: Boolean(row.storageKey),
+        createdAt: row.createdAt,
+        createdBy: row.createdBy,
+        meeting: row.meeting,
+      },
+      201,
+    );
+  } catch (err) {
+    if (err instanceof EvidenceValidationError) {
+      return errorResponse(Errors.badRequest(err.message));
+    }
+    return errorResponse(err);
+  }
+}
+
+async function downloadMinutesDocumentHandler(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
   try {
     const user = await requireUser(req);
@@ -265,12 +192,17 @@ async function exportMinutesHandler(req: HttpRequest, _ctx: InvocationContext): 
     if (!existing) throw Errors.notFound("Minutes");
     await requireViewCommittee(user, existing.meeting.committeeId);
 
-    const doc = await buildMinutesDocx(minutesId);
+    const doc = await downloadMinutesDocument(minutesId);
+    const inline =
+      req.query.get("inline") === "1" ||
+      req.query.get("disposition") === "inline" ||
+      req.query.get("preview") === "1";
+    const safeName = doc.filename.replace(/"/g, "");
     return {
       status: 200,
       headers: {
         "Content-Type": doc.contentType,
-        "Content-Disposition": `attachment; filename="${doc.filename}"`,
+        "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${safeName}"`,
         "Cache-Control": "no-store",
         ...corsHeaders(),
       },
@@ -288,6 +220,20 @@ app.http("minutesForMeeting", {
   handler: handleMinutesForMeeting,
 });
 
+app.http("uploadMinutesDocument", {
+  methods: ["POST", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "meetings/{id}/minutes/upload",
+  handler: uploadMinutesDocumentHandler,
+});
+
+app.http("downloadMinutesDocument", {
+  methods: ["GET", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "minutes/{minutesId}/download",
+  handler: downloadMinutesDocumentHandler,
+});
+
 app.http("getMinutes", {
   methods: ["GET", "OPTIONS"],
   authLevel: "anonymous",
@@ -295,37 +241,9 @@ app.http("getMinutes", {
   handler: getMinutesHandler,
 });
 
-app.http("issueMinutes", {
-  methods: ["POST", "OPTIONS"],
-  authLevel: "anonymous",
-  route: "minutes/{minutesId}/issue",
-  handler: issueMinutesHandler,
-});
-
-app.http("approveMinutes", {
-  methods: ["POST", "OPTIONS"],
-  authLevel: "anonymous",
-  route: "minutes/{minutesId}/approve",
-  handler: approveMinutesHandler,
-});
-
 app.http("importMinutes", {
   methods: ["POST", "OPTIONS"],
   authLevel: "anonymous",
   route: "meetings/{id}/minutes/import",
   handler: importMinutesHandler,
-});
-
-app.http("exportMinutes", {
-  methods: ["GET", "OPTIONS"],
-  authLevel: "anonymous",
-  route: "minutes/{minutesId}/export",
-  handler: exportMinutesHandler,
-});
-
-app.http("minutesMailPreview", {
-  methods: ["GET", "OPTIONS"],
-  authLevel: "anonymous",
-  route: "minutes/{minutesId}/mail-preview",
-  handler: minutesMailPreviewHandler,
 });

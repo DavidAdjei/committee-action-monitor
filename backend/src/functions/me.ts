@@ -22,11 +22,15 @@ async function me(req: HttpRequest, _ctx: InvocationContext): Promise<HttpRespon
       fullName: user.fullName,
       email: user.email,
       department: user.department,
-      isCentralCommittee: user.isCentralCommittee,
       isAdmin: user.isAdmin,
-      /** Central Committee sub-role: MEMBER | ADMINISTRATOR | null */
+      /** Central Committee sub-role: MEMBER | ADMINISTRATOR | null (independent of isAdmin). */
       centralRole: (user as { centralRole?: "MEMBER" | "ADMINISTRATOR" | null }).centralRole
-        ?? (user.isAdmin ? "ADMINISTRATOR" : user.isCentralCommittee ? "MEMBER" : null),
+        ?? (user.isCentralCommittee ? "MEMBER" : null),
+      isCentralCommittee: Boolean(
+        user.isCentralCommittee ||
+          (user as { centralRole?: string | null }).centralRole === "MEMBER" ||
+          (user as { centralRole?: string | null }).centralRole === "ADMINISTRATOR",
+      ),
       memberships: memberships.map((m) => ({
         ...m,
         committee: committees.find((c) => c.id === m.committeeId),

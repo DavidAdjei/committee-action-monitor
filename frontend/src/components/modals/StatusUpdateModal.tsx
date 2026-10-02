@@ -60,8 +60,8 @@ export function StatusUpdateModal({
       setError("Only the committee Chairperson or Secretary may cancel an action.");
       return;
     }
-    if (status === "COMPLETED" && files.length === 0 && !evidenceLink.trim()) {
-      setError("Attach at least one evidence file or provide an evidence link for completion.");
+    if (status === "COMPLETED" && !note.trim()) {
+      setError("A completion comment is required when marking an action as completed.");
       return;
     }
     if ((status === "OVERDUE" || status === "CANCELLED") && !note.trim()) {
@@ -185,7 +185,9 @@ export function StatusUpdateModal({
             ? "Blocker / reason outstanding"
             : status === "CANCELLED"
               ? "Cancellation reason"
-              : "Status update / remarks"}
+              : status === "COMPLETED"
+                ? "Completion comment"
+                : "Status update / remarks"}
           <textarea
             required
             className="field-input min-h-[80px]"
@@ -194,7 +196,9 @@ export function StatusUpdateModal({
                 ? "Explain the blocker, dependency or reason for delay"
                 : status === "CANCELLED"
                   ? "Record the governance decision and rationale"
-                  : "Describe work completed, current position and next steps"
+                  : status === "COMPLETED"
+                    ? "Describe what was done and any residual notes for the verifier"
+                    : "Describe work completed, current position and next steps"
             }
             value={note}
             onChange={(e) => setNote(e.target.value)}
@@ -225,7 +229,6 @@ export function StatusUpdateModal({
                     <input
                       type="file"
                       multiple
-                      required={status === "COMPLETED" && !evidenceLink}
                       onChange={(e) => {
                         const list = e.target.files ? Array.from(e.target.files) : [];
                         setFiles((prev) => [...prev, ...list]);
@@ -233,7 +236,7 @@ export function StatusUpdateModal({
                       }}
                     />
                     <p className="mt-1 text-xs text-slate-400">
-                      PDF, Word, Excel, JPG or PNG · Max 20 MB each · Multiple files allowed
+                      PDF, Word, Excel, JPG or PNG · Max 20 MB each · Multiple files allowed · Optional
                     </p>
                   </div>
                 </div>
@@ -259,7 +262,7 @@ export function StatusUpdateModal({
                 )}
               </div>
               <small className="font-normal text-slate-400">
-                Evidence is required when marking an action Completed (file and/or link).
+                Evidence is optional. A completion comment is required when marking Completed.
               </small>
             </label>
 

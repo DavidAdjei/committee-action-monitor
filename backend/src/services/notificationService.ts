@@ -46,68 +46,21 @@ export function buildActionNotifications(params: {
   });
 }
 
-/**
- * Actually dispatching email/Teams messages is an integration concern
- * (Microsoft Graph `sendMail`, SMTP relay, etc.) that depends on
- * Bank-approved credentials and templates — see section 7 of the system
- * documentation. This function is the single seam a delivery worker plugs
- * into; it deliberately does not import any Graph SDK so the API stays
- * deployable without those credentials configured.
- */
 export type OutboundNotification = {
   id: number;
   recipientId: number;
   notificationType: string;
-  /** Optional file attachments (e.g. attendance CSV on MINUTES_ISSUED). */
   attachments?: { filename: string; contentType: string; content: string; encoding: "utf-8" | "base64" }[];
 };
 
-export async function dispatchPendingNotifications(
-  send: (n: OutboundNotification) => Promise<void>,
-  prismaClient: Prisma.TransactionClient | typeof import("../lib/prisma").prisma,
-): Promise<{ sent: number; failed: number }> {
-  const pending = await prismaClient.notification.findMany({
-    where: { deliveryStatus: "PENDING", scheduledFor: { lte: new Date() } },
-    take: 200,
-  });
-
-  let sent = 0;
-  let failed = 0;
-  for (const n of pending) {
-    try {
-      let attachments: OutboundNotification["attachments"];
-      // Minutes-issued emails attach the meeting attendance register as CSV.
-      if (n.notificationType === "MINUTES_ISSUED") {
-        try {
-          const match = /^minutes:(\d+):/.exec(n.idempotencyKey ?? "");
-          if (match) {
-            const minutesId = Number(match[1]);
-            const { buildMinutesIssuedMail } = await import("./minutesMailService");
-            const mail = await buildMinutesIssuedMail(minutesId);
-            attachments = mail.attachments;
-          }
-        } catch {
-          attachments = undefined;
-        }
-      }
-      await send({
-        id: n.id,
-        recipientId: n.recipientId,
-        notificationType: n.notificationType,
-        attachments,
-      });
-      await prismaClient.notification.update({
-        where: { id: n.id },
-        data: { deliveryStatus: "SENT", sentAt: new Date() },
-      });
-      sent += 1;
-    } catch (err) {
-      await prismaClient.notification.update({
-        where: { id: n.id },
-        data: { deliveryStatus: "FAILED", errorMessage: String(err).slice(0, 500) },
-      });
-      failed += 1;
-    }
-  }
-  return { sent, failed };
+/**
+ * Drain the outbox using Graph sendMail (see emailDispatchService).
+ * Prefer calling `triggerEmailDispatchAsync()` after enqueueing notifications.
+ */
+export async function dispatchPendingNotifications(): Promise<{ sent: number; failed: number }> {
+  const { processPendingEmailQueue } = await import("./emailDispatchService");
+  const result = await processPendingEmailQueue(200);
+  return { sent: result.sent, failed: result.failed };
 }
+
+export { triggerEmailDispatchAsync } from "./emailDispatchService";

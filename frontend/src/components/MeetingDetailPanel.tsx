@@ -7,6 +7,7 @@ import { ApiClientError } from "@/api/client";
 import { useFlash } from "@/state/toastContext";
 import { useAuth } from "@/state/authContext";
 import { canCreateMeeting } from "@/lib/permissions";
+import { PreviewMinutesButton } from "@/components/MinutesDocumentPreview";
 
 interface MeetingDetail {
   id: number;
@@ -22,6 +23,11 @@ interface MeetingDetail {
   teamsJoinUrl: string | null;
   attendanceToken?: string;
   attendanceSheetUrl?: string | null;
+  outcome?: "SCHEDULED" | "HELD" | "DID_NOT_HOLD" | "POSTPONED";
+  outcomeReason?: string | null;
+  postponedTo?: string | null;
+  outcomeRecordedAt?: string | null;
+  outcomeRecordedBy?: { id: number; fullName: string } | null;
   attendance: {
     userId: number;
     fullName: string;
@@ -33,7 +39,16 @@ interface MeetingDetail {
   }[];
   createdBy: { id: number; fullName: string };
   createdAt: string;
-  minutes: { id: number; status: string; createdAt: string; issuedAt: string | null }[];
+  minutes: {
+    id: number;
+    status: string;
+    filename?: string | null;
+    mediaType?: string | null;
+    sizeBytes?: number | null;
+    hasFile?: boolean;
+    createdAt: string;
+    createdBy?: { id: number; fullName: string };
+  }[];
   actionPoints: {
     id: number;
     referenceNo: string;
@@ -61,6 +76,14 @@ export function MeetingDetailPanel({
   const [sheetUrl, setSheetUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [showAttendance, setShowAttendance] = useState(false);
+  const [showOutcome, setShowOutcome] = useState(false);
+  const [outcomeType, setOutcomeType] = useState<"DID_NOT_HOLD" | "POSTPONED" | "HELD">("DID_NOT_HOLD");
+  const [outcomeReason, setOutcomeReason] = useState("");
+  const [postponeDate, setPostponeDate] = useState("");
+  const [postponeTime, setPostponeTime] = useState("10:00");
+  const [minutesKind, setMinutesKind] = useState<"DRAFT" | "FINAL">("DRAFT");
+  const [minutesFile, setMinutesFile] = useState<File | null>(null);
+  const [minutesBusy, setMinutesBusy] = useState(false);
 
   const load = () =>
     endpoints.meetingDetail(meetingId).then((d) => {
@@ -316,29 +339,234 @@ export function MeetingDetailPanel({
         </div>
 
         <div>
+          <b className="mb-1.5 block text-sm text-slate-800 dark:text-slate-100">Meeting outcome</b>
+          <p className="mb-2 text-xs text-slate-500">
+            Current:{" "}
+            <b className="text-slate-800 dark:text-slate-100">{detail.outcome ?? "SCHEDULED"}</b>
+            {detail.outcomeReason ? ` — ${detail.outcomeReason}` : ""}
+            {detail.postponedTo ? ` · New date ${formatDate(detail.postponedTo)}` : ""}
+          </p>
+          {canManage && (
+            <button type="button" className="btn text-sm" onClick={() => setShowOutcome((v) => !v)}>
+              {showOutcome ? "Hide outcome form" : "Record did not hold / postpone"}
+            </button>
+          )}
+          {showOutcome && canManage && (
+            <div className="mt-3 space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["DID_NOT_HOLD", "Did not hold"],
+                    ["POSTPONED", "Postponed"],
+                    ["HELD", "Held as planned"],
+                  ] as const
+                ).map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+                      outcomeType === v
+                        ? "border-brand-500 bg-brand-50 text-brand-800 dark:bg-brand-500/20"
+                        : "border-slate-200 dark:border-slate-600"
+                    }`}
+                    onClick={() => setOutcomeType(v)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label className="field-label">
+                Reason
+                <textarea
+                  className="field-input min-h-[60px]"
+                  required
+                  placeholder="Why the meeting did not proceed, or postponement rationale"
+                  value={outcomeReason}
+                  onChange={(e) => setOutcomeReason(e.target.value)}
+                />
+              </label>
+              {outcomeType === "POSTPONED" && (
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="field-label">
+                    New date
+                    <input
+                      type="date"
+                      className="field-input"
+                      required
+                      value={postponeDate}
+                      onChange={(e) => setPostponeDate(e.target.value)}
+                    />
+                  </label>
+                  <label className="field-label">
+                    New start time
+                    <input
+                      type="time"
+                      className="field-input"
+                      value={postponeTime}
+                      onChange={(e) => setPostponeTime(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
+              <button
+                type="button"
+                className="btn-primary text-sm"
+                disabled={busy}
+                onClick={() => {
+                  if (!outcomeReason.trim()) {
+                    flash("A reason is required.", "error");
+                    return;
+                  }
+                  if (outcomeType === "POSTPONED" && !postponeDate) {
+                    flash("Choose a new meeting date.", "error");
+                    return;
+                  }
+                  setBusy(true);
+                  void endpoints
+                    .recordMeetingOutcome(meetingId, {
+                      outcome: outcomeType,
+                      reason: outcomeReason.trim(),
+                      postponedTo:
+                        outcomeType === "POSTPONED"
+                          ? new Date(`${postponeDate}T${postponeTime || "10:00"}:00`).toISOString()
+                          : undefined,
+                    })
+                    .then(() => {
+                      flash("Meeting outcome recorded");
+                      setShowOutcome(false);
+                      setOutcomeReason("");
+                      return load();
+                    })
+                    .catch((err: unknown) =>
+                      flash(err instanceof ApiClientError ? err.message : "Could not save outcome.", "error"),
+                    )
+                    .finally(() => setBusy(false));
+                }}
+              >
+                {busy ? "Saving…" : "Save outcome"}
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div>
           <b className="mb-1.5 block text-sm text-slate-800 dark:text-slate-100">
-            Minutes ({detail.minutes.length})
+            Minutes documents ({detail.minutes.length})
           </b>
+          <p className="mb-2 text-xs text-slate-500">
+            One <b>draft</b> (Word or PDF) and one <b>final</b> (PDF only) per meeting. Uploading again replaces that
+            type.
+          </p>
           {detail.minutes.length === 0 ? (
-            <p className="text-sm text-slate-400">No minutes recorded for this meeting yet.</p>
+            <p className="text-sm text-slate-400">No minutes documents uploaded yet.</p>
           ) : (
             <ul className="space-y-1.5">
               {detail.minutes.map((m) => (
-                <li key={m.id}>
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:border-brand-300 dark:border-slate-700"
-                    onClick={() => onOpenMinutes?.(m.id)}
-                  >
-                    <span>
-                      Status <b>{m.status}</b>
-                      <span className="text-xs text-slate-400"> · Created {formatDate(m.createdAt)}</span>
+                <li
+                  key={m.id}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700"
+                >
+                  <span>
+                    <b className="text-slate-800 dark:text-slate-100">{m.status}</b>
+                    {m.filename ? ` · ${m.filename}` : ""}
+                    <span className="block text-xs text-slate-400">
+                      {m.createdBy?.fullName ? `${m.createdBy.fullName} · ` : ""}
+                      {formatDate(m.createdAt)}
+                      {m.sizeBytes != null ? ` · ${Math.round(m.sizeBytes / 1024)} KB` : ""}
                     </span>
-                    <ExternalLink className="h-3.5 w-3.5 text-slate-400" />
-                  </button>
+                  </span>
+                  <span className="flex shrink-0 gap-1">
+                    {m.hasFile && (
+                      <>
+                        <PreviewMinutesButton
+                          minutesId={m.id}
+                          filename={m.filename}
+                          mediaType={m.mediaType}
+                          hasFile
+                          className="btn text-xs"
+                        />
+                        <button
+                          type="button"
+                          className="btn text-xs"
+                          onClick={() =>
+                            void endpoints
+                              .downloadMinutesDocument(m.id, m.filename ?? undefined)
+                              .catch((err: unknown) =>
+                                flash(
+                                  err instanceof ApiClientError ? err.message : "Download failed.",
+                                  "error",
+                                ),
+                              )
+                          }
+                        >
+                          Download
+                        </button>
+                      </>
+                    )}
+                    {onOpenMinutes && (
+                      <button type="button" className="btn text-xs" onClick={() => onOpenMinutes(m.id)}>
+                        Open
+                      </button>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>
+          )}
+          {canManage && (
+            <div className="mt-3 space-y-2 rounded-lg border border-dashed border-slate-300 p-3 dark:border-slate-600">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+                    minutesKind === "DRAFT"
+                      ? "border-brand-500 bg-brand-50 dark:bg-brand-500/20"
+                      : "border-slate-200 dark:border-slate-600"
+                  }`}
+                  onClick={() => setMinutesKind("DRAFT")}
+                >
+                  Draft (Word/PDF)
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+                    minutesKind === "FINAL"
+                      ? "border-brand-500 bg-brand-50 dark:bg-brand-500/20"
+                      : "border-slate-200 dark:border-slate-600"
+                  }`}
+                  onClick={() => setMinutesKind("FINAL")}
+                >
+                  Final (PDF only)
+                </button>
+              </div>
+              <input
+                type="file"
+                accept={minutesKind === "FINAL" ? ".pdf,application/pdf" : ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+                onChange={(e) => setMinutesFile(e.target.files?.[0] ?? null)}
+              />
+              <button
+                type="button"
+                className="btn-primary text-sm"
+                disabled={minutesBusy || !minutesFile}
+                onClick={() => {
+                  if (!minutesFile) return;
+                  setMinutesBusy(true);
+                  void endpoints
+                    .uploadMinutesDocument(meetingId, minutesFile, minutesKind)
+                    .then(() => {
+                      flash(`${minutesKind === "FINAL" ? "Final" : "Draft"} minutes uploaded`);
+                      setMinutesFile(null);
+                      return load();
+                    })
+                    .catch((err: unknown) =>
+                      flash(err instanceof ApiClientError ? err.message : "Upload failed.", "error"),
+                    )
+                    .finally(() => setMinutesBusy(false));
+                }}
+              >
+                {minutesBusy ? "Uploading…" : `Upload ${minutesKind === "FINAL" ? "final" : "draft"}`}
+              </button>
+            </div>
           )}
         </div>
       </div>

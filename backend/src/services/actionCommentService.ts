@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { Errors } from "../lib/http";
 import { auditRow } from "./auditService";
-import { buildActionNotifications } from "./notificationService";
+import { buildActionNotifications, triggerEmailDispatchAsync } from "./notificationService";
 import { isCentralMember } from "../lib/authorize";
 import type { User } from "@prisma/client";
 
@@ -86,6 +86,7 @@ export async function addActionComment(params: {
     return row;
   });
 
+  triggerEmailDispatchAsync();
   return comment;
 }
 

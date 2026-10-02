@@ -33,7 +33,7 @@ export function MultiStakeholderPicker({
   // Fetch only when the search query changes (debounced)
   useEffect(() => {
     const handle = window.setTimeout(() => {
-      endpoints.directory(query).then((users) => {
+      endpoints.directory(query, 8).then((users) => {
         setRawResults(users);
       });
     }, 200);

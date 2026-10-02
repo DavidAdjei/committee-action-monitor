@@ -58,10 +58,30 @@ export default function Committees() {
                   <th className="px-4 py-3 font-semibold">Code</th>
                   <th className="px-4 py-3 font-semibold">Your role</th>
                   <th className="px-4 py-3 font-semibold">Frequency</th>
-                  <th className="px-4 py-3 font-semibold text-right">Total</th>
-                  <th className="px-4 py-3 font-semibold text-right">Active</th>
-                  <th className="px-4 py-3 font-semibold text-right">Overdue</th>
-                  <th className="px-4 py-3 font-semibold text-right">On-time</th>
+                  <th
+                    className="px-4 py-3 font-semibold text-right"
+                    title="All action points raised for this committee"
+                  >
+                    Actions
+                  </th>
+                  <th
+                    className="px-4 py-3 font-semibold text-right"
+                    title="Not yet completed: open, in progress, pending verification, or overdue"
+                  >
+                    Open
+                  </th>
+                  <th
+                    className="px-4 py-3 font-semibold text-right"
+                    title="Action points past their deadline and not completed"
+                  >
+                    Overdue
+                  </th>
+                  <th
+                    className="px-4 py-3 font-semibold text-right"
+                    title="Share of completed actions finished on or before the deadline"
+                  >
+                    On-time rate
+                  </th>
                 </tr>
               </thead>
               <tbody>

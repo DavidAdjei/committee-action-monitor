@@ -32,7 +32,7 @@ export const endpoints = {
       }[]
     >("/dev/users"),
 
-  directory: (q: string) => api.get<DirectoryUser[]>(`/directory?q=${encodeURIComponent(q)}`),
+  directory: (q: string, limit?: number) => api.get<DirectoryUser[]>(`/directory?q=${encodeURIComponent(q)}${limit != null ? `&limit=${limit}` : ""}`),
   syncDirectory: () =>
     api.post<{
       created: number;
@@ -94,12 +94,21 @@ export const endpoints = {
     >(`/me/meetings${suffix}`);
   },
   meetingDetail: (meetingId: number) => api.get(`/meetings/${meetingId}`),
+  recordMeetingOutcome: (
+    meetingId: number,
+    data: {
+      outcome: "HELD" | "DID_NOT_HOLD" | "POSTPONED";
+      reason: string;
+      postponedTo?: string;
+      postponedEndsAt?: string;
+    },
+  ) => api.post(`/meetings/${meetingId}/outcome`, data),
   attendanceCheckIn: (meetingId: number, data: { token?: string; method?: string; userId?: number; note?: string }) =>
     api.post(`/meetings/${meetingId}/attendance/check-in`, data),
   setAttendanceSheet: (meetingId: number, url: string) =>
     api.post(`/meetings/${meetingId}/attendance/sheet`, { url }),
   listAttendance: (meetingId: number) => api.get(`/meetings/${meetingId}/attendance`),
-  createMeeting: (
+  createMeeting: async (
     committeeId: number,
     data: {
       reference?: string;
@@ -110,35 +119,67 @@ export const endpoints = {
       agenda?: string;
       teamsRequested?: boolean;
     },
-  ) =>
-    api.post<
+    options?: { graphAccessToken?: string | null },
+  ) => {
+    const headers: Record<string, string> = {};
+    let graphToken = options?.graphAccessToken ?? null;
+    // Interactive Teams: acquire delegated OnlineMeetings.ReadWrite for /me/onlineMeetings
+    if (data.teamsRequested && !graphToken) {
+      try {
+        const { acquireGraphTeamsToken } = await import("@/auth/graphToken");
+        graphToken = await acquireGraphTeamsToken();
+      } catch {
+        // OBO on the API token may still succeed
+      }
+    }
+    if (graphToken) {
+      headers["X-Graph-Access-Token"] = graphToken;
+    }
+    return api.post<
       Meeting & {
         teamsProvisioned?: boolean;
         teamsOrganizer?: string | null;
         teamsEventId?: string | null;
         teamsJoinUrl?: string | null;
+        teamsAuthMode?: "delegated" | "application" | null;
       }
-    >(`/committees/${committeeId}/meetings`, data),
+    >(`/committees/${committeeId}/meetings`, data, { headers });
+  },
 
+  uploadMeetingPaper: (meetingId: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.postForm<{ id: number; filename: string }>(`/meetings/${meetingId}/papers`, form);
+  },
+  listMeetingPapers: (meetingId: number) => api.get(`/meetings/${meetingId}/papers`),
+  notifyMeetingPapers: (meetingId: number) => api.post(`/meetings/${meetingId}/papers/notify`, {}),
   listMeetingMinutes: (meetingId: number) =>
     api.get<MeetingMinutes[]>(`/meetings/${meetingId}/minutes`),
-  createMinutes: (
-    meetingId: number,
-    data: {
-      sourcePopulation: string;
-      discussion: string;
-      includedActionPointIds: number[];
-      documentUrl?: string;
-    },
-  ) => api.post<MeetingMinutes>(`/meetings/${meetingId}/minutes`, data),
-  /** Find-or-create actions (multi-owner) and optionally create minutes linked to them */
+  uploadMinutesDocument: (meetingId: number, file: File, status: "DRAFT" | "FINAL", discussion?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("status", status);
+    if (discussion) form.append("discussion", discussion);
+    return api.postForm<{
+      id: number;
+      status: string;
+      filename: string | null;
+      hasFile: boolean;
+      sizeBytes: number | null;
+    }>(`/meetings/${meetingId}/minutes/upload`, form);
+  },
+  downloadMinutesDocument: (minutesId: number, filename?: string) =>
+    api.download(`/minutes/${minutesId}/download`, filename ?? `minutes-${minutesId}`),
+  /** Fetch minutes file for in-app preview (inline disposition). */
+  fetchMinutesDocumentBlob: (minutesId: number) =>
+    api.fetchBlob(`/minutes/${minutesId}/download?inline=1`),
+  /** Find-or-create actions (multi-owner) and optionally create/replace draft minutes */
   importMinutes: (
     meetingId: number,
     data: {
       discussion?: string;
-      documentUrl?: string;
       actionsOnly?: boolean;
-      sourcePopulation?: string;
+      replaceExisting?: boolean;
       actions: {
         title: string;
         description?: string;
@@ -156,19 +197,6 @@ export const endpoints = {
       summary: { created: number; linkedExisting: number };
     }>(`/meetings/${meetingId}/minutes/import`, data),
   getMinutes: (minutesId: number) => api.get<MeetingMinutes>(`/minutes/${minutesId}`),
-  issueMinutes: (minutesId: number, data?: { documentUrl?: string }) =>
-    api.post<MeetingMinutes>(`/minutes/${minutesId}/issue`, data ?? {}),
-  approveMinutes: (minutesId: number) => api.post<MeetingMinutes>(`/minutes/${minutesId}/approve`, {}),
-  exportMinutesUrl: (minutesId: number) => `/minutes/${minutesId}/export`,
-  exportMinutes: (minutesId: number) => api.download(`/minutes/${minutesId}/export`, `minutes-${minutesId}.docx`),
-  minutesMailPreview: (minutesId: number) =>
-    api.get<{
-      subject: string;
-      htmlBody: string;
-      textBody: string;
-      attachments: { filename: string; contentType: string; content: string; encoding: string }[];
-      recipientCount: number;
-    }>(`/minutes/${minutesId}/mail-preview`),
 
   actionsForCommittee: (committeeId: number, params?: { status?: string; q?: string }) => {
     const qs = new URLSearchParams();

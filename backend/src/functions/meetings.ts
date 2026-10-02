@@ -9,8 +9,11 @@ import {
   markAttendance,
   setAttendanceSheetUrl,
   listAttendance,
+  recordMeetingOutcome,
 } from "../services/meetingService";
 import { tryProvisionTeamsForMeeting } from "../services/teamsMeetingService";
+import { addMeetingPaper, listMeetingPapers, emailMeetingPapersToCommittee } from "../services/meetingPaperService";
+import { EvidenceValidationError } from "../services/storageService";
 
 async function listMeetings(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
@@ -79,8 +82,19 @@ async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): 
       createdById: user.id,
     });
 
-    // Best-effort Teams online meeting under the creator (Secretary/Chair) as organizer.
-    // Failure does not roll back the CAM meeting; join URL is simply omitted.
+    // Interactive create: delegated OnlineMeetings.ReadWrite (OBO or X-Graph-Access-Token).
+    // Jobs/timers should call provisionTeamsForMeetingAsApplication instead.
+    const authHeader = req.headers.get("authorization") ?? req.headers.get("Authorization");
+    const apiAccessToken =
+      authHeader && authHeader.toLowerCase().startsWith("bearer ")
+        ? authHeader.slice(7).trim()
+        : null;
+    const graphAccessToken =
+      req.headers.get("x-graph-access-token") ??
+      req.headers.get("X-Graph-Access-Token") ??
+      (body as { graphAccessToken?: string }).graphAccessToken ??
+      null;
+
     const teams = await tryProvisionTeamsForMeeting({
       meetingId: meeting.id,
       committeeId,
@@ -90,6 +104,10 @@ async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): 
       createdById: user.id,
       agenda: body.agenda,
       teamsRequested,
+      authMode: "delegated",
+      apiAccessToken,
+      graphAccessToken,
+      allowApplicationFallback: true,
     });
 
     return ok(
@@ -99,6 +117,7 @@ async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): 
         teamsJoinUrl: teams?.teamsJoinUrl ?? meeting.teamsJoinUrl,
         teamsProvisioned: Boolean(teams?.teamsJoinUrl),
         teamsOrganizer: teams?.organizerUpn ?? null,
+        teamsAuthMode: teams?.authMode ?? null,
       },
       201,
     );
@@ -136,9 +155,19 @@ async function meetingDetailHandler(req: HttpRequest, _ctx: InvocationContext): 
         committee: { select: { id: true, name: true, code: true } },
         createdBy: { select: { id: true, fullName: true } },
         minutes: {
-          select: { id: true, status: true, createdAt: true, issuedAt: true },
+          select: {
+            id: true,
+            status: true,
+            filename: true,
+            mediaType: true,
+            sizeBytes: true,
+            storageKey: true,
+            createdAt: true,
+                        createdBy: { select: { id: true, fullName: true } },
+          },
           orderBy: { createdAt: "desc" },
         },
+        outcomeRecordedBy: { select: { id: true, fullName: true } },
         actionPoints: {
           select: {
             id: true,
@@ -188,9 +217,59 @@ async function meetingDetailHandler(req: HttpRequest, _ctx: InvocationContext): 
       })),
       createdBy: meeting.createdBy,
       createdAt: meeting.createdAt,
-      minutes: meeting.minutes,
+      outcome: meeting.outcome,
+      outcomeReason: meeting.outcomeReason,
+      postponedTo: meeting.postponedTo,
+      outcomeRecordedAt: meeting.outcomeRecordedAt,
+      outcomeRecordedBy: meeting.outcomeRecordedBy,
+      minutes: meeting.minutes.map((m) => ({
+        id: m.id,
+        status: m.status,
+        filename: m.filename,
+        mediaType: m.mediaType,
+        sizeBytes: m.sizeBytes,
+        hasFile: Boolean(m.storageKey),
+        createdAt: m.createdAt,
+        createdBy: m.createdBy,
+      })),
       actionPoints: meeting.actionPoints,
     });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+async function meetingOutcomeHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const meetingId = Number(req.params.meetingId);
+    if (!Number.isInteger(meetingId)) throw Errors.badRequest("Invalid meeting id.");
+
+    const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!meeting) throw Errors.notFound("Meeting");
+    await requireCommitteeOfficer(user, meeting.committeeId);
+
+    const body = (await req.json()) as {
+      outcome?: "HELD" | "DID_NOT_HOLD" | "POSTPONED";
+      reason?: string;
+      postponedTo?: string;
+      postponedEndsAt?: string;
+    };
+    if (!body.outcome || !["HELD", "DID_NOT_HOLD", "POSTPONED"].includes(body.outcome)) {
+      throw Errors.badRequest("outcome must be HELD, DID_NOT_HOLD, or POSTPONED.");
+    }
+
+    const updated = await recordMeetingOutcome({
+      meetingId,
+      actorUserId: user.id,
+      outcome: body.outcome,
+      reason: body.reason ?? "",
+      postponedTo: body.postponedTo ? new Date(body.postponedTo) : undefined,
+      postponedEndsAt: body.postponedEndsAt ? new Date(body.postponedEndsAt) : undefined,
+    });
+
+    return ok(updated);
   } catch (err) {
     return errorResponse(err);
   }
@@ -357,6 +436,13 @@ app.http("meetingDetail", {
   handler: meetingDetailHandler,
 });
 
+app.http("meetingOutcome", {
+  methods: ["POST", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "meetings/{meetingId}/outcome",
+  handler: meetingOutcomeHandler,
+});
+
 app.http("meetingAttendanceCheckIn", {
   methods: ["POST", "OPTIONS"],
   authLevel: "anonymous",
@@ -383,4 +469,71 @@ app.http("myMeetings", {
   authLevel: "anonymous",
   route: "me/meetings",
   handler: listMyMeetings,
+});
+
+async function meetingPapersHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const meetingId = Number(req.params.meetingId);
+    if (!Number.isInteger(meetingId)) throw Errors.badRequest("Invalid meeting id.");
+    const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!meeting) throw Errors.notFound("Meeting");
+
+    if (req.method === "GET") {
+      await requireViewCommittee(user, meeting.committeeId);
+      const papers = await listMeetingPapers(meetingId);
+      return ok(papers);
+    }
+
+    await requireCommitteeOfficer(user, meeting.committeeId);
+    const form = await req.formData();
+    const file = form.get("file");
+    if (!file || typeof file === "string") throw Errors.badRequest("A file field is required.");
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const row = await addMeetingPaper({
+      meetingId,
+      actorUserId: user.id,
+      filename: file.name,
+      mediaType: file.type || "application/octet-stream",
+      buffer,
+    });
+    return ok(row, 201);
+  } catch (err) {
+    if (err instanceof EvidenceValidationError) {
+      return errorResponse(Errors.badRequest(err.message));
+    }
+    return errorResponse(err);
+  }
+}
+
+async function meetingPapersNotifyHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const meetingId = Number(req.params.meetingId);
+    if (!Number.isInteger(meetingId)) throw Errors.badRequest("Invalid meeting id.");
+    const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!meeting) throw Errors.notFound("Meeting");
+    await requireCommitteeOfficer(user, meeting.committeeId);
+    const result = await emailMeetingPapersToCommittee(meetingId);
+    return ok(result);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+
+app.http("meetingPapers", {
+  methods: ["GET", "POST", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "meetings/{meetingId}/papers",
+  handler: meetingPapersHandler,
+});
+
+app.http("meetingPapersNotify", {
+  methods: ["POST", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "meetings/{meetingId}/papers/notify",
+  handler: meetingPapersNotifyHandler,
 });

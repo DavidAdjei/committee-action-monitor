@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { Errors } from "../lib/http";
-import { buildActionNotifications } from "./notificationService";
+import { buildActionNotifications, triggerEmailDispatchAsync } from "./notificationService";
 import { auditRow } from "./auditService";
 
 export interface CreateCommitteeInput {
@@ -35,7 +35,7 @@ export async function createCommittee(input: CreateCommitteeInput) {
     ...input.memberIds,
   ]);
 
-  return prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const committee = await tx.committee.create({
       data: {
         name: input.name,
@@ -89,6 +89,8 @@ export async function createCommittee(input: CreateCommitteeInput) {
 
     return committee;
   });
+  triggerEmailDispatchAsync();
+  return created;
 }
 
 export interface AddMemberInput {

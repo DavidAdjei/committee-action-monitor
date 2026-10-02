@@ -5,7 +5,6 @@ import { endpoints } from "@/api/endpoints";
 import { StatusPill, DueBadge, ProgressBar, formatDate } from "@/components/StatusBits";
 import { NewActionModal } from "@/components/modals/NewActionModal";
 import { CreateMeetingModal } from "@/components/modals/CreateMeetingModal";
-import { CreateMinutesModal } from "@/components/modals/CreateMinutesModal";
 import { ImportDocumentModal } from "@/components/modals/ImportDocumentModal";
 import { AddMemberModal } from "@/components/modals/AddMemberModal";
 import { SetChairModal } from "@/components/modals/SetChairModal";
@@ -24,6 +23,7 @@ import {
   canManageCommittee,
   canManageMembers,
 } from "@/lib/permissions";
+// canCreateMinutes still used for canEdit officer gate
 import { MeetingDetailPanel } from "@/components/MeetingDetailPanel";
 import { AttendanceQrProjector } from "@/components/AttendanceQrProjector";
 import type { ActionListItem, CommitteeDetail, Meeting, MeetingMinutes } from "@/types";
@@ -51,7 +51,6 @@ export default function CommitteeWorkspace() {
     mode: "view" | "add";
   } | null>(null);
   const [showNewMeeting, setShowNewMeeting] = useState(false);
-  const [showNewMinutes, setShowNewMinutes] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
   const [showSetChair, setShowSetChair] = useState(false);
   const [showSetCentralRep, setShowSetCentralRep] = useState(false);
@@ -252,11 +251,8 @@ export default function CommitteeWorkspace() {
               <button className="btn gap-1.5 text-xs" onClick={() => setShowNewMeeting(true)}>
                 <CalendarPlus className="h-4 w-4 text-slate-600 dark:text-slate-300" /> New meeting
               </button>
-              <button className="btn gap-1.5 text-xs" onClick={() => setShowNewMinutes(true)}>
-                <FileText className="h-4 w-4 text-slate-600 dark:text-slate-300" /> Create minutes
-              </button>
               <button className="btn gap-1.5 text-xs" onClick={() => setShowImport(true)}>
-                <Upload className="h-4 w-4 text-slate-600 dark:text-slate-300" /> Import document
+                <Upload className="h-4 w-4 text-slate-600 dark:text-slate-300" /> Import
               </button>
               <button className="btn-primary gap-1.5 text-xs" onClick={() => setShowNewAction(true)}>
                 <ListPlus className="h-4 w-4" /> New action point
@@ -274,8 +270,8 @@ export default function CommitteeWorkspace() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
-        <SummaryTile label="Total" value={detail.summary.totalActions} />
-        <SummaryTile label="Active" value={detail.summary.activeActions} tone="text-blue-600" />
+        <SummaryTile label="Action points" value={detail.summary.totalActions} />
+        <SummaryTile label="Still open" value={detail.summary.activeActions} tone="text-blue-600" />
         <SummaryTile label="Overdue" value={detail.summary.overdueActions} tone="text-red-600" />
         <SummaryTile label="On-time rate" value={`${detail.summary.onTimeRate ?? "—"}%`} tone="text-emerald-600" />
       </div>
@@ -667,20 +663,19 @@ export default function CommitteeWorkspace() {
                     </b>
                     <span
                       className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        min.status === "APPROVED"
+                        min.status === "FINAL"
                           ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                          : min.status === "ISSUED"
-                            ? "bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
                       }`}
                     >
                       {min.status}
                     </span>
                   </div>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    {min.snapshots.length} action snapshot{min.snapshots.length === 1 ? "" : "s"} · Created{" "}
-                    {formatDate(min.createdAt)} by {min.createdBy.fullName}
-                    {min.issuedAt ? ` · Issued ${formatDate(min.issuedAt)}` : ""}
+                    {min.snapshots?.length ?? 0} action snapshot
+                    {(min.snapshots?.length ?? 0) === 1 ? "" : "s"} · Created {formatDate(min.createdAt)} by{" "}
+                    {min.createdBy.fullName}
+                    {min.filename ? ` · ${min.filename}` : ""}
                   </p>
                 </div>
                 <span className="shrink-0 text-xs font-medium text-brand-600">View details →</span>
@@ -688,7 +683,7 @@ export default function CommitteeWorkspace() {
             ))}
           {!minutesLoading && minutesList.length === 0 && (
             <p className="card text-sm text-slate-400">
-              No minutes yet. Use <b>Create minutes</b> to capture discussion and freeze action statuses.
+              No minutes yet. Use <b>Import</b> to upload a draft or final minutes document for a meeting.
             </p>
           )}
         </div>
@@ -701,7 +696,7 @@ export default function CommitteeWorkspace() {
           onClose={() => setShowImport(false)}
           onImported={async () => {
             setShowImport(false);
-            flash("Document imported — actions matched or created and linked");
+            flash("Import completed successfully");
             const d = await endpoints.committee(committeeId);
             setDetail(d);
             setTab("Action Points");
@@ -722,14 +717,6 @@ export default function CommitteeWorkspace() {
           committeeId={committeeId}
           committeeName={detail.name}
           onClose={() => setShowNewMeeting(false)}
-          onCreated={refreshAll}
-        />
-      )}
-      {showNewMinutes && (
-        <CreateMinutesModal
-          committeeId={committeeId}
-          committeeName={detail.name}
-          onClose={() => setShowNewMinutes(false)}
           onCreated={refreshAll}
         />
       )}

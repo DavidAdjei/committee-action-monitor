@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { buildActionNotifications } from "./notificationService";
+import { buildActionNotifications, triggerEmailDispatchAsync } from "./notificationService";
 
 /** Work still owned by the action owner — subject to daily reminders + auto-overdue. */
 const WORK_IN_PROGRESS_STATUSES = ["OPEN", "IN_PROGRESS"] as const;
@@ -76,5 +76,6 @@ export async function runDailyReminderAndEscalation(): Promise<{
     escalated += 1;
   }
 
+  triggerEmailDispatchAsync();
   return { remindersQueued, escalated };
 }

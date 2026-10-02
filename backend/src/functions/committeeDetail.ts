@@ -1,7 +1,16 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
-import { requireViewCommittee, requireCentralCommittee, requireCommitteeOfficer, isCommitteeOfficer } from "../lib/authorize";
+import {
+  requireViewCommittee,
+  requireCentralCommittee,
+  requireCommitteeOfficer,
+  isCommitteeOfficer,
+  isPlatformAdmin,
+  isCentralMember,
+  canGovernCommittees,
+  requireCentralAdministrator,
+} from "../lib/authorize";
 import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
 import { committeeSummary } from "../services/reportService";
 import { recordDenied } from "../services/auditService";
@@ -32,13 +41,18 @@ async function committeeDetail(req: HttpRequest, _ctx: InvocationContext): Promi
       where: { userId: user.id, committeeId: id, active: true },
     });
     const myRole = myMembership?.role ?? null;
-    const canEdit = Boolean(user.isAdmin) || myRole === "CHAIRPERSON" || myRole === "SECRETARY";
-    const isCentralCommitteeViewOnly = Boolean(user.isCentralCommittee && !user.isAdmin && !canEdit);
+    // Write access to operational content: platform admin or committee officers only
+    const canEdit =
+      isPlatformAdmin(user) || myRole === "CHAIRPERSON" || myRole === "SECRETARY";
+    // Central members (incl. Central Admin) without officer seat: view-only
+    const isCentralCommitteeViewOnly = Boolean(
+      isCentralMember(user) && !isPlatformAdmin(user) && !canEdit,
+    );
     const officer = await isCommitteeOfficer(user.id, id);
-    // Leadership changes & bank-wide governance: admin / central
-    const canManageCommittee = Boolean(user.isAdmin || user.isCentralCommittee);
-    // Add/change members & roles: chair/secretary of this committee, or admin
-    const canManageMembers = Boolean(user.isAdmin || officer);
+    // Set chair / secretary / central rep: platform admin or Central Administrator
+    const canManageCommittee = canGovernCommittees(user);
+    // Add ordinary members: committee officers or platform admin
+    const canManageMembers = Boolean(isPlatformAdmin(user) || officer);
 
     const [summary] = await committeeSummary([id]);
 
@@ -92,20 +106,22 @@ async function addMemberHandler(req: HttpRequest, _ctx: InvocationContext): Prom
     const committeeId = Number(req.params.id);
     if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
 
-    // Chairperson/Secretary may add members and assign roles; admins always may.
-    if (!user.isAdmin) {
-      await requireCommitteeOfficer(user, committeeId);
-    }
-
+    // Chairperson/Secretary may add members; platform admin always may.
+    // Assigning Chairperson is Central Administrator (or platform admin) only.
     const body = (await req.json()) as {
       userId?: number;
       role?: "CHAIRPERSON" | "SECRETARY" | "MEMBER";
     };
     if (!body.userId) throw Errors.badRequest("userId is required.");
 
-    // Assigning Chairperson is reserved for Central Committee (Set Chair flow).
-    if (body.role === "CHAIRPERSON" && !user.isAdmin && !user.isCentralCommittee) {
-      throw Errors.forbidden("Only Central Committee members may assign the Chairperson role.");
+    if (body.role === "CHAIRPERSON") {
+      if (!canGovernCommittees(user)) {
+        throw Errors.forbidden(
+          "Only a Central Committee Administrator may assign the Chairperson role.",
+        );
+      }
+    } else if (!isPlatformAdmin(user)) {
+      await requireCommitteeOfficer(user, committeeId);
     }
 
     const membership = await addCommitteeMember({
@@ -129,7 +145,7 @@ async function setChairHandler(req: HttpRequest, _ctx: InvocationContext): Promi
     if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
 
     // Leadership reassignment is a Central Committee / Admin control only.
-    await requireCentralCommittee(user);
+    await requireCentralAdministrator(user);
 
     const body = (await req.json()) as {
       chairpersonId?: number;
@@ -162,7 +178,7 @@ async function removeMemberHandler(req: HttpRequest, _ctx: InvocationContext): P
       throw Errors.badRequest("Invalid committee or user id.");
     }
 
-    if (!user.isAdmin) {
+    if (!isPlatformAdmin(user)) {
       await requireCommitteeOfficer(user, committeeId);
     }
 
@@ -199,7 +215,7 @@ async function setCentralRepHandler(req: HttpRequest, _ctx: InvocationContext): 
     if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
 
     // Only Central Committee / Admin may assign the Central rep seat
-    await requireCentralCommittee(user);
+    await requireCentralAdministrator(user);
 
     const body = (await req.json()) as { centralRepId?: number | null };
     // null or omit clears; number assigns (must be Central — enforced in service)

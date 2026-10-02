@@ -224,8 +224,8 @@ export interface AuditEvent {
   correlationId?: string | null;
 }
 
-export type MinutesStatus = "DRAFT" | "ISSUED" | "APPROVED";
-export type MinutesSource = "LATEST_MEETING" | "PREVIOUS_MEETING" | "ALL_OPEN_ACTIONS";
+export type MinutesStatus = "DRAFT" | "FINAL";
+export type MeetingOutcome = "SCHEDULED" | "HELD" | "DID_NOT_HOLD" | "POSTPONED";
 
 export interface MinuteActionSnapshot {
   actionPointId: number;
@@ -243,12 +243,12 @@ export interface MeetingMinutes {
   id: number;
   meetingId: number;
   status: MinutesStatus;
-  sourcePopulation: MinutesSource | string;
   discussion: string | null;
-  documentUrl: string | null;
+  filename?: string | null;
+  mediaType?: string | null;
+  sizeBytes?: number | null;
+  hasFile?: boolean;
   createdBy: { id: number; fullName: string };
-  issuedAt: string | null;
-  approvedAt: string | null;
   createdAt: string;
   meeting: {
     id: number;

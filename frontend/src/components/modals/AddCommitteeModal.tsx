@@ -1,6 +1,7 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { Modal, ModalActions } from "@/components/Modal";
 import { MultiStakeholderPicker } from "@/components/MultiStakeholderPicker";
+import { UserTypeahead } from "@/components/UserTypeahead";
 import { endpoints } from "@/api/endpoints";
 import { useFlash } from "@/state/toastContext";
 import type { DirectoryUser } from "@/types";
@@ -18,9 +19,17 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const leadershipIds = useMemo(
+    () => [chairperson?.id, secretary?.id, centralRep?.id].filter((id): id is number => id != null),
+    [chairperson, secretary, centralRep],
+  );
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!chairperson || !secretary || !centralRep) return;
+    if (!chairperson || !secretary || !centralRep) {
+      setError("Chairperson, Secretary, and Central Committee representative are required.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -37,20 +46,15 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
       flash("Committee created and leadership notified");
       onCreated();
       onClose();
-    } catch (err: any) {
-      setError(err.message ?? "Could not create the committee.");
+    } catch (err: unknown) {
+      setError((err as Error)?.message ?? "Could not create the committee.");
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <Modal
-      title="Create committee"
-      subtitle="Central Committee Administrator only"
-      onClose={onClose}
-      wide
-    >
+    <Modal title="Create committee" subtitle="Central Committee Administrator only" onClose={onClose} wide>
       <form onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="field-label">
@@ -73,7 +77,7 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
           Mandate
           <textarea
             className="field-input min-h-[70px]"
-            placeholder="What this committee is responsible for"
+            placeholder="Optional description of the committee’s purpose"
             value={mandate}
             onChange={(e) => setMandate(e.target.value)}
           />
@@ -81,18 +85,46 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
 
         <label className="field-label">
           Meeting frequency
-          <select className="field-input" value={meetingFrequency} onChange={(e) => setMeetingFrequency(e.target.value)}>
+          <select
+            className="field-input"
+            value={meetingFrequency}
+            onChange={(e) => setMeetingFrequency(e.target.value)}
+          >
             <option>Weekly</option>
-            <option>Bi-weekly</option>
             <option>Monthly</option>
             <option>Quarterly</option>
           </select>
         </label>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <PersonSelect label="Chairperson" value={chairperson} onChange={setChairperson} />
-          <PersonSelect label="Secretary" value={secretary} onChange={setSecretary} />
-          <PersonSelect label="Central Committee representative" value={centralRep} onChange={setCentralRep} centralOnly />
+          <UserTypeahead
+            label="Chairperson"
+            value={chairperson}
+            onChange={setChairperson}
+            required
+            placeholder="Type name or email…"
+            excludeIds={leadershipIds.filter((id) => id !== chairperson?.id)}
+            helpText="Type to search. Top 5 matches."
+          />
+          <UserTypeahead
+            label="Secretary"
+            value={secretary}
+            onChange={setSecretary}
+            required
+            placeholder="Type name or email…"
+            excludeIds={leadershipIds.filter((id) => id !== secretary?.id)}
+            helpText="Type to search. Top 5 matches."
+          />
+          <UserTypeahead
+            label="Central Committee representative"
+            value={centralRep}
+            onChange={setCentralRep}
+            required
+            placeholder="Type name or email…"
+            excludeIds={leadershipIds.filter((id) => id !== centralRep?.id)}
+            filterUser={(u) => Boolean(u.isCentralCommittee)}
+            helpText="Must be a Central Committee member. Type to search."
+          />
         </div>
 
         <MultiStakeholderPicker
@@ -100,10 +132,10 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
           helpText="Anyone selected here joins with the Member role."
           selected={members}
           onChange={setMembers}
-          excludeIds={[chairperson?.id, secretary?.id, centralRep?.id].filter(Boolean) as number[]}
+          excludeIds={leadershipIds}
         />
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
         <ModalActions>
           <button type="button" className="btn" onClick={onClose}>
@@ -115,55 +147,5 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
         </ModalActions>
       </form>
     </Modal>
-  );
-}
-
-function PersonSelect({
-  label,
-  value,
-  onChange,
-  centralOnly = false,
-  allowClear = false,
-}: {
-  label: string;
-  value: DirectoryUser | null;
-  onChange: (u: DirectoryUser | null) => void;
-  centralOnly?: boolean;
-  allowClear?: boolean;
-}) {
-  const [options, setOptions] = useState<DirectoryUser[]>([]);
-  const [loaded, setLoaded] = useState(false);
-
-  if (!loaded) {
-    endpoints.directory("").then((all) => {
-      setOptions(centralOnly ? all.filter((u) => u.isCentralCommittee) : all);
-      setLoaded(true);
-    });
-  }
-
-  return (
-    <label className="field-label">
-      {label}
-      <select
-        required={!allowClear}
-        className="field-input"
-        value={value?.id ?? ""}
-        onChange={(e) =>
-          onChange(
-            e.target.value ? options.find((o) => o.id === Number(e.target.value)) ?? null : null,
-          )
-        }
-      >
-        <option value="">{allowClear ? "None" : "Select…"}</option>
-        {options.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.fullName}
-          </option>
-        ))}
-      </select>
-      {centralOnly && (
-        <small className="font-normal text-slate-400">Must be a Central Committee Member.</small>
-      )}
-    </label>
   );
 }

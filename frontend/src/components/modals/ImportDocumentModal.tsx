@@ -12,7 +12,8 @@ import {
 import { parseSpreadsheetActions } from "@/lib/xlsxImport";
 import type { DirectoryUser, Meeting } from "@/types";
 
-type Mode = "minutes_and_actions" | "actions_only";
+type Mode = "minutes_document" | "actions_only";
+type MinutesKind = "DRAFT" | "FINAL";
 type Step = "choose" | "preview";
 
 export function ImportDocumentModal({
@@ -27,26 +28,30 @@ export function ImportDocumentModal({
   onImported: () => void;
 }) {
   const [step, setStep] = useState<Step>("choose");
-  const [mode, setMode] = useState<Mode>("minutes_and_actions");
+  const [mode, setMode] = useState<Mode>("minutes_document");
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [meetingId, setMeetingId] = useState<number | "">("");
   const [directory, setDirectory] = useState<DirectoryUser[]>([]);
+
+  // Minutes document upload
+  const [minutesKind, setMinutesKind] = useState<MinutesKind>("DRAFT");
+  const [minutesFile, setMinutesFile] = useState<File | null>(null);
+
+  // Actions-only parse flow
   const [fileName, setFileName] = useState<string | null>(null);
-  const [discussion, setDiscussion] = useState("");
   const [actions, setActions] = useState<ParsedActionDraft[]>([]);
-  /** Resolved system users per action key */
   const [ownerIds, setOwnerIds] = useState<Record<string, number[]>>({});
-  /** Names from the file that could not be matched */
   const [unmatchedNames, setUnmatchedNames] = useState<Record<string, string[]>>({});
-  /** Per-row "add user" search */
   const [addQuery, setAddQuery] = useState<Record<string, string>>({});
   const [warnings, setWarnings] = useState<string[]>([]);
+
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [existingMinutes, setExistingMinutes] = useState<{ status: string; filename?: string | null }[]>([]);
 
   useEffect(() => {
-    Promise.all([endpoints.meetings(committeeId), endpoints.directory("")])
+    Promise.all([endpoints.meetings(committeeId), endpoints.directory("", 1000)])
       .then(([m, d]) => {
         setMeetings(m);
         setDirectory(d);
@@ -54,6 +59,27 @@ export function ImportDocumentModal({
       })
       .catch(() => setError("Could not load meetings or directory."));
   }, [committeeId]);
+
+  useEffect(() => {
+    if (!meetingId) {
+      setExistingMinutes([]);
+      return;
+    }
+    void endpoints
+      .listMeetingMinutes(Number(meetingId))
+      .then((list) => {
+        const relevant = (list as { status: string; filename?: string | null }[]).filter((m) =>
+          ["DRAFT", "FINAL"].includes(String(m.status).toUpperCase()),
+        );
+        setExistingMinutes(relevant);
+      })
+      .catch(() => setExistingMinutes([]));
+  }, [meetingId]);
+
+  const existingOfKind = useMemo(
+    () => existingMinutes.find((m) => String(m.status).toUpperCase() === minutesKind),
+    [existingMinutes, minutesKind],
+  );
 
   const userById = useMemo(() => {
     const map = new Map<number, DirectoryUser>();
@@ -73,7 +99,7 @@ export function ImportDocumentModal({
     setUnmatchedNames(unmatched);
   };
 
-  const onFile = async (file: File | null) => {
+  const onActionsFile = async (file: File | null) => {
     if (!file) return;
     setParsing(true);
     setError(null);
@@ -81,35 +107,26 @@ export function ImportDocumentModal({
     try {
       const lower = file.name.toLowerCase();
       let actionsList: ParsedActionDraft[] = [];
-      let discussionText = "";
       let warn: string[] = [];
 
       if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
         actionsList = await parseSpreadsheetActions(file);
-        if (mode === "minutes_and_actions") {
-          warn.push(
-            "Excel import fills action points only. Add or paste minutes discussion in the preview if needed.",
-          );
-        }
         if (actionsList.length === 0) {
           warn.push(
             "No action rows detected in the spreadsheet. Check that the sheet has Action/Owner/Due columns.",
           );
         }
       } else if (lower.endsWith(".docx")) {
-        const parsed = await parseDocxImport(file, mode);
-        discussionText = parsed.discussion;
+        const parsed = await parseDocxImport(file, "actions_only");
         actionsList = parsed.actions;
         warn = parsed.warnings;
       } else {
         const textContent = await extractTextFromFile(file);
-        const parsed = parseImportDocument(textContent, mode);
-        discussionText = parsed.discussion;
+        const parsed = parseImportDocument(textContent, "actions_only");
         actionsList = parsed.actions;
         warn = parsed.warnings;
       }
 
-      setDiscussion(discussionText);
       setActions(actionsList);
       applyOwnerMatches(actionsList);
       setWarnings(warn);
@@ -121,7 +138,6 @@ export function ImportDocumentModal({
     }
   };
 
-  // Re-match when directory loads after file parse
   useEffect(() => {
     if (step === "preview" && actions.length > 0 && directory.length > 0) {
       applyOwnerMatches(actions);
@@ -154,7 +170,65 @@ export function ImportDocumentModal({
     }));
   };
 
-  const submit = async (e: FormEvent) => {
+  const submitMinutesDocument = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!meetingId) {
+      setError("Select the meeting these minutes belong to.");
+      return;
+    }
+    if (!minutesFile) {
+      setError(
+        minutesKind === "FINAL"
+          ? "Choose a PDF file for final minutes."
+          : "Choose a Word or PDF file for draft minutes.",
+      );
+      return;
+    }
+
+    const lower = minutesFile.name.toLowerCase();
+    if (minutesKind === "FINAL" && !lower.endsWith(".pdf")) {
+      setError("Final minutes must be a PDF file.");
+      return;
+    }
+    if (
+      minutesKind === "DRAFT" &&
+      !lower.endsWith(".pdf") &&
+      !lower.endsWith(".doc") &&
+      !lower.endsWith(".docx")
+    ) {
+      setError("Draft minutes must be a Word (.doc/.docx) or PDF file.");
+      return;
+    }
+
+    if (existingOfKind) {
+      const label = minutesKind === "FINAL" ? "final" : "draft";
+      const okReplace = window.confirm(
+        `This meeting already has ${label} minutes` +
+          (existingOfKind.filename ? ` (${existingOfKind.filename})` : "") +
+          `.\n\nDo you want to replace them with this file?`,
+      );
+      if (!okReplace) return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      await endpoints.uploadMinutesDocument(Number(meetingId), minutesFile, minutesKind);
+      onImported();
+    } catch (err: unknown) {
+      setError(
+        err instanceof ApiClientError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Upload failed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitActionsOnly = async (e: FormEvent) => {
     e.preventDefault();
     if (!meetingId) {
       setError("Select the meeting these items belong to.");
@@ -162,10 +236,6 @@ export function ImportDocumentModal({
     }
     if (included.length === 0) {
       setError("Select at least one action point to upload.");
-      return;
-    }
-    if (mode === "minutes_and_actions" && !discussion.trim()) {
-      setError("Discussion / minutes body is required.");
       return;
     }
 
@@ -189,10 +259,7 @@ export function ImportDocumentModal({
       });
 
       await endpoints.importMinutes(Number(meetingId), {
-        discussion: mode === "minutes_and_actions" ? discussion.trim() : undefined,
-        documentUrl: fileName ? `uploaded:${fileName}` : undefined,
-        actionsOnly: mode === "actions_only",
-        sourcePopulation: "LATEST_MEETING",
+        actionsOnly: true,
         actions: payloadActions,
       });
 
@@ -211,15 +278,13 @@ export function ImportDocumentModal({
   };
 
   return (
-    <Modal title="Import from document" subtitle={committeeName} onClose={onClose} wide>
-      <form onSubmit={submit} className="space-y-4">
+    <Modal title="Import" subtitle={committeeName} onClose={onClose} wide>
+      <form
+        onSubmit={mode === "minutes_document" ? submitMinutesDocument : submitActionsOnly}
+        className="space-y-4"
+      >
         {step === "choose" && (
           <>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Upload a Word minutes pack or action tracker. You will preview and edit owners before anything is saved.
-              Names in the <strong>Owner</strong> column are matched to users in the system.
-            </p>
-
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium text-slate-700 dark:text-slate-200">
                 What are you importing?
@@ -228,13 +293,20 @@ export function ImportDocumentModal({
                 <input
                   type="radio"
                   name="mode"
-                  checked={mode === "minutes_and_actions"}
-                  onChange={() => setMode("minutes_and_actions")}
+                  checked={mode === "minutes_document"}
+                  onChange={() => {
+                    setMode("minutes_document");
+                    setStep("choose");
+                    setActions([]);
+                    setMinutesFile(null);
+                  }}
                   className="mt-1"
                 />
                 <span>
-                  <span className="block text-sm font-semibold">Minutes and action points</span>
-                  <span className="text-xs text-slate-500">Discussion body + decision/action tracker rows</span>
+                  <span className="block text-sm font-semibold">Minutes document</span>
+                  <span className="text-xs text-slate-500">
+                    Upload a draft (Word/PDF) or final (PDF only) for a meeting
+                  </span>
                 </span>
               </label>
               <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 p-3 dark:border-slate-600">
@@ -242,12 +314,17 @@ export function ImportDocumentModal({
                   type="radio"
                   name="mode"
                   checked={mode === "actions_only"}
-                  onChange={() => setMode("actions_only")}
+                  onChange={() => {
+                    setMode("actions_only");
+                    setMinutesFile(null);
+                  }}
                   className="mt-1"
                 />
                 <span>
                   <span className="block text-sm font-semibold">Action points only</span>
-                  <span className="text-xs text-slate-500">From an action tracker (e.g. summary of decisions)</span>
+                  <span className="text-xs text-slate-500">
+                    Parse an action tracker and match owners (preview before save)
+                  </span>
                 </span>
               </label>
             </fieldset>
@@ -269,26 +346,95 @@ export function ImportDocumentModal({
               </select>
             </label>
 
-            <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center dark:border-slate-600 dark:bg-slate-900/40">
-              <FileUp className="h-8 w-8 text-brand-600 dark:text-brand-400" />
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                {parsing ? "Reading document…" : "Choose .docx, .xlsx, .csv or .txt"}
-              </span>
-              <span className="text-xs text-slate-500">
-                Preview opens before upload · Owner column → action owners
-              </span>
-              <input
-                type="file"
-                accept=".docx,.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/plain,text/csv"
-                className="sr-only"
-                disabled={parsing || !meetingId}
-                onChange={(e) => void onFile(e.target.files?.[0] ?? null)}
-              />
-            </label>
+            {mode === "minutes_document" && (
+              <>
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Minutes type
+                  </legend>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                        minutesKind === "DRAFT"
+                          ? "border-brand-500 bg-brand-50 text-brand-900 dark:bg-brand-500/20 dark:text-brand-100"
+                          : "border-slate-200 dark:border-slate-600"
+                      }`}
+                      onClick={() => setMinutesKind("DRAFT")}
+                    >
+                      Draft (Word or PDF)
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                        minutesKind === "FINAL"
+                          ? "border-brand-500 bg-brand-50 text-brand-900 dark:bg-brand-500/20 dark:text-brand-100"
+                          : "border-slate-200 dark:border-slate-600"
+                      }`}
+                      onClick={() => setMinutesKind("FINAL")}
+                    >
+                      Final (PDF only)
+                    </button>
+                  </div>
+                </fieldset>
+
+                {existingOfKind && (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                    This meeting already has <b>{minutesKind.toLowerCase()}</b> minutes
+                    {existingOfKind.filename ? ` (${existingOfKind.filename})` : ""}. Uploading will ask
+                    you to confirm replacement.
+                  </p>
+                )}
+
+                <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center dark:border-slate-600 dark:bg-slate-900/40">
+                  <FileUp className="h-8 w-8 text-brand-600 dark:text-brand-400" />
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                    {minutesFile
+                      ? minutesFile.name
+                      : minutesKind === "FINAL"
+                        ? "Choose final minutes PDF"
+                        : "Choose draft minutes (Word or PDF)"}
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    {minutesKind === "FINAL" ? "PDF only · Max 20 MB" : ".doc, .docx or .pdf · Max 20 MB"}
+                  </span>
+                  <input
+                    type="file"
+                    accept={
+                      minutesKind === "FINAL"
+                        ? ".pdf,application/pdf"
+                        : ".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    }
+                    className="sr-only"
+                    disabled={!meetingId}
+                    onChange={(e) => setMinutesFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              </>
+            )}
+
+            {mode === "actions_only" && (
+              <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center dark:border-slate-600 dark:bg-slate-900/40">
+                <FileUp className="h-8 w-8 text-brand-600 dark:text-brand-400" />
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  {parsing ? "Reading document…" : "Choose .docx, .xlsx, .csv or .txt"}
+                </span>
+                <span className="text-xs text-slate-500">
+                  Preview opens before upload · Owner column → action owners
+                </span>
+                <input
+                  type="file"
+                  accept=".docx,.xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/plain,text/csv"
+                  className="sr-only"
+                  disabled={parsing || !meetingId}
+                  onChange={(e) => void onActionsFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            )}
           </>
         )}
 
-        {step === "preview" && (
+        {step === "preview" && mode === "actions_only" && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900/40">
               <span>
@@ -300,7 +446,6 @@ export function ImportDocumentModal({
                 onClick={() => {
                   setStep("choose");
                   setActions([]);
-                  setDiscussion("");
                   setFileName(null);
                   setOwnerIds({});
                   setUnmatchedNames({});
@@ -316,25 +461,11 @@ export function ImportDocumentModal({
               </p>
             ))}
 
-            {mode === "minutes_and_actions" && (
-              <label className="field-label">
-                Minutes / discussion (editable)
-                <textarea
-                  className="field-input min-h-[120px] font-normal"
-                  value={discussion}
-                  onChange={(e) => setDiscussion(e.target.value)}
-                  required
-                />
-              </label>
-            )}
-
             <div>
               <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                   Action points preview
-                  <span className="ml-1.5 font-normal text-slate-500">
-                    ({included.length} selected)
-                  </span>
+                  <span className="ml-1.5 font-normal text-slate-500">({included.length} selected)</span>
                 </p>
               </div>
 
@@ -400,7 +531,6 @@ export function ImportDocumentModal({
                         </div>
 
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                          {/* Owners */}
                           <div className="sm:col-span-2 space-y-2">
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
@@ -413,7 +543,6 @@ export function ImportDocumentModal({
                               ) : null}
                             </div>
 
-                            {/* Matched / selected users */}
                             <div className="flex min-h-[36px] flex-wrap gap-1.5 rounded-lg border border-slate-200 bg-slate-50/80 p-2 dark:border-slate-600 dark:bg-slate-800/40">
                               {selectedIds.length === 0 ? (
                                 <span className="text-xs text-slate-400">No owners selected — add below</span>
@@ -441,7 +570,6 @@ export function ImportDocumentModal({
                               )}
                             </div>
 
-                            {/* Unmatched names from file */}
                             {unmatched.length > 0 && (
                               <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-2.5 py-2 dark:border-amber-900 dark:bg-amber-950/30">
                                 <p className="mb-1.5 text-[11px] font-semibold text-amber-800 dark:text-amber-200">
@@ -468,7 +596,6 @@ export function ImportDocumentModal({
                               </div>
                             )}
 
-                            {/* Add user search */}
                             {a.include && (
                               <div className="relative">
                                 <div className="flex items-center gap-1.5">
@@ -493,9 +620,7 @@ export function ImportDocumentModal({
                                         >
                                           <Plus className="h-3 w-3 text-brand-600" />
                                           <span className="font-medium">{u.fullName}</span>
-                                          {u.email && (
-                                            <span className="text-slate-400">{u.email}</span>
-                                          )}
+                                          {u.email && <span className="text-slate-400">{u.email}</span>}
                                         </button>
                                       </li>
                                     ))}
@@ -550,14 +675,6 @@ export function ImportDocumentModal({
                                 <option value="PENDING_VERIFICATION">Pending verification</option>
                                 <option value="COMPLETED">Completed</option>
                               </select>
-                              {a.statusHint ? (
-                                <span className="mt-1 block text-[10px] text-slate-400">
-                                  From file: {a.statusHint}
-                                  {a.status === "IN_PROGRESS" || a.status === "OVERDUE"
-                                    ? ` · ${a.progress}%`
-                                    : ""}
-                                </span>
-                              ) : null}
                             </label>
                           </div>
                         </div>
@@ -576,7 +693,15 @@ export function ImportDocumentModal({
           <button type="button" className="btn" onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          {step === "preview" && (
+          {mode === "minutes_document" && step === "choose" && (
+            <button type="submit" className="btn-primary" disabled={busy || !minutesFile || !meetingId}>
+              <Upload className="h-4 w-4" />
+              {busy
+                ? "Uploading…"
+                : `Upload ${minutesKind === "FINAL" ? "final" : "draft"} minutes`}
+            </button>
+          )}
+          {mode === "actions_only" && step === "preview" && (
             <button type="submit" className="btn-primary" disabled={busy || parsing}>
               <Upload className="h-4 w-4" />
               {busy ? "Uploading…" : "Confirm upload"}

@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Video } from "lucide-react";
+import { FileUp, Video, X } from "lucide-react";
 import { Modal, ModalActions } from "@/components/Modal";
 import { endpoints } from "@/api/endpoints";
 import { useFlash } from "@/state/toastContext";
@@ -28,6 +28,8 @@ export function CreateMeetingModal({
   const [venue, setVenue] = useState("Board Room, Head Office");
   const [agenda, setAgenda] = useState("");
   const [teams, setTeams] = useState(true);
+  const [papers, setPapers] = useState<File[]>([]);
+  const [notifyPapers, setNotifyPapers] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,16 +52,41 @@ export function CreateMeetingModal({
         agenda,
         teamsRequested: teams,
       });
+      const meetingId = (created as { id: number }).id;
       const provisioned = Boolean(
-        teams && created && typeof created === "object" && (created as { teamsJoinUrl?: string | null }).teamsJoinUrl,
+        (created as { teamsProvisioned?: boolean }).teamsProvisioned ||
+          (created as { teamsJoinUrl?: string | null }).teamsJoinUrl,
       );
-      flash(
-        teams
-          ? provisioned
-            ? "Meeting created with Microsoft Teams join link"
-            : "Meeting saved — Teams link could not be created yet (check Graph config / organizer Teams license). Meeting is still available in CAM."
-          : "Meeting created successfully",
-      );
+      const teamsAuthMode = (created as { teamsAuthMode?: string | null }).teamsAuthMode;
+
+      for (const file of papers) {
+        await endpoints.uploadMeetingPaper(meetingId, file);
+      }
+
+      if (papers.length > 0 && notifyPapers) {
+        try {
+          await endpoints.notifyMeetingPapers(meetingId);
+        } catch {
+          // Meeting and papers are saved; email is best-effort
+        }
+      }
+
+      if (teams) {
+        if (provisioned) {
+          flash(
+            papers.length
+              ? `Meeting created with Teams link (${teamsAuthMode ?? "delegated"}); papers uploaded`
+              : `Meeting created with Microsoft Teams join link (${teamsAuthMode ?? "delegated"})`,
+          );
+        } else {
+          flash(
+            "Meeting saved — Teams join link could not be created. Check Graph consent (OnlineMeetings.ReadWrite) and that the organizer has a Teams license. The meeting is still available in CAM.",
+            "error",
+          );
+        }
+      } else {
+        flash(papers.length ? "Meeting created; papers uploaded" : "Meeting created successfully");
+      }
       onCreated();
       onClose();
     } catch (err: unknown) {
@@ -139,19 +166,84 @@ export function CreateMeetingModal({
             onChange={(e) => setAgenda(e.target.value)}
           />
         </label>
-        <label className="flex items-start gap-3 rounded-lg border border-slate-200 p-3">
-          <input type="checkbox" className="mt-1" checked={teams} onChange={(e) => setTeams(e.target.checked)} />
+
+        <label className="flex items-start gap-3 rounded-lg border border-slate-200 p-3 dark:border-slate-600">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={teams}
+            onChange={(e) => setTeams(e.target.checked)}
+          />
           <Video className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
           <span className="text-sm">
             <b className="block text-slate-800 dark:text-slate-100">Create an online Microsoft Teams meeting</b>
             <small className="text-slate-500">
-              Requires the Bank's Microsoft 365 connection. Attendees will receive the Teams invitation after
-              authorization.
+              Creates a Teams join link for this meeting. Committee officers and active members are added as
+              attendees. Uses your Microsoft account (OnlineMeetings.ReadWrite); falls back to app permissions if
+              needed.
             </small>
           </span>
         </label>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Meeting papers</p>
+          <p className="text-xs text-slate-500">
+            Optional agenda pack or supporting documents. These can be emailed to committee members after
+            creation.
+          </p>
+          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center dark:border-slate-600 dark:bg-slate-900/40">
+            <FileUp className="h-7 w-7 text-brand-600 dark:text-brand-400" />
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Add PDF, Word or Excel files
+            </span>
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.xls,.xlsx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="sr-only"
+              onChange={(e) => {
+                const list = e.target.files ? Array.from(e.target.files) : [];
+                setPapers((prev) => [...prev, ...list]);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          {papers.length > 0 && (
+            <ul className="space-y-1">
+              {papers.map((f, i) => (
+                <li
+                  key={`${f.name}-${i}`}
+                  className="flex items-center justify-between rounded-md bg-slate-50 px-2.5 py-1.5 text-xs dark:bg-slate-800"
+                >
+                  <span className="truncate font-medium">
+                    {f.name}{" "}
+                    <span className="font-normal text-slate-400">({Math.round(f.size / 1024)} KB)</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="text-slate-400 hover:text-red-600"
+                    onClick={() => setPapers((prev) => prev.filter((_, j) => j !== i))}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {papers.length > 0 && (
+            <label className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={notifyPapers}
+                onChange={(e) => setNotifyPapers(e.target.checked)}
+              />
+              Email papers to committee members after the meeting is saved
+            </label>
+          )}
+        </div>
+
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
         <ModalActions>
           <button type="button" className="btn" onClick={onClose}>

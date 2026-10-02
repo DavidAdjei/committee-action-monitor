@@ -132,6 +132,90 @@ export async function attachTeamsEvent(meetingId: number, teamsEventId: string, 
   });
 }
 
+export type MeetingOutcomeInput = {
+  meetingId: number;
+  actorUserId: number;
+  outcome: "HELD" | "DID_NOT_HOLD" | "POSTPONED";
+  reason: string;
+  /** Required when outcome is POSTPONED — new meeting start */
+  postponedTo?: Date;
+  /** Optional new end time when postponed */
+  postponedEndsAt?: Date;
+};
+
+/**
+ * Secretary/Chair records why a meeting did not proceed, or that it was postponed
+ * (with a new date). Postponement also updates startsAt/endsAt for the calendar.
+ */
+export async function recordMeetingOutcome(input: MeetingOutcomeInput) {
+  const meeting = await prisma.meeting.findUnique({ where: { id: input.meetingId } });
+  if (!meeting) throw Errors.notFound("Meeting");
+
+  const reason = (input.reason || "").trim();
+  if (!reason) {
+    throw Errors.badRequest("A reason is required when recording the meeting outcome.");
+  }
+
+  if (input.outcome === "POSTPONED") {
+    if (!input.postponedTo || Number.isNaN(input.postponedTo.getTime())) {
+      throw Errors.badRequest("A new meeting date is required when postponing.");
+    }
+  }
+
+  const data: {
+    outcome: "HELD" | "DID_NOT_HOLD" | "POSTPONED";
+    outcomeReason: string;
+    postponedTo: Date | null;
+    outcomeRecordedAt: Date;
+    outcomeRecordedById: number;
+    startsAt?: Date;
+    endsAt?: Date | null;
+  } = {
+    outcome: input.outcome,
+    outcomeReason: reason,
+    postponedTo: input.outcome === "POSTPONED" ? input.postponedTo! : null,
+    outcomeRecordedAt: new Date(),
+    outcomeRecordedById: input.actorUserId,
+  };
+
+  if (input.outcome === "POSTPONED" && input.postponedTo) {
+    data.startsAt = input.postponedTo;
+    if (input.postponedEndsAt && input.postponedEndsAt > input.postponedTo) {
+      data.endsAt = input.postponedEndsAt;
+    } else if (meeting.endsAt && meeting.startsAt) {
+      const durationMs = meeting.endsAt.getTime() - meeting.startsAt.getTime();
+      data.endsAt = new Date(input.postponedTo.getTime() + Math.max(durationMs, 60 * 60 * 1000));
+    }
+  }
+
+  const updated = await prisma.meeting.update({
+    where: { id: input.meetingId },
+    data,
+    include: {
+      outcomeRecordedBy: { select: { id: true, fullName: true } },
+      committee: { select: { id: true, name: true, code: true } },
+    },
+  });
+
+  await prisma.auditEvent.create({
+    data: auditRow({
+      actorUserId: input.actorUserId,
+      action: "meeting.outcome",
+      resourceType: "meeting",
+      resourceId: input.meetingId,
+      committeeId: meeting.committeeId,
+      after: {
+        outcome: input.outcome,
+        reason,
+        postponedTo: data.postponedTo?.toISOString() ?? null,
+      },
+      result: "SUCCESS",
+    }),
+  });
+
+  return updated;
+}
+
 export async function markAttendance(params: {
   meetingId: number;
   userId: number;

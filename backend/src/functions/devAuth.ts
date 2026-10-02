@@ -44,9 +44,15 @@ async function devUsers(req: HttpRequest, _ctx: InvocationContext): Promise<Http
         fullName: u.fullName,
         email: u.email,
         department: u.department,
-        isCentralCommittee: u.isCentralCommittee,
+        isCentralCommittee: Boolean(
+          u.isCentralCommittee ||
+            (u as { centralRole?: string | null }).centralRole === "MEMBER" ||
+            (u as { centralRole?: string | null }).centralRole === "ADMINISTRATOR",
+        ),
         isAdmin: u.isAdmin,
-        centralRole: u.isAdmin ? "ADMINISTRATOR" : u.isCentralCommittee ? "MEMBER" : null,
+        centralRole:
+          (u as { centralRole?: "MEMBER" | "ADMINISTRATOR" | null }).centralRole ??
+          (u.isCentralCommittee ? "MEMBER" : null),
         memberships: u.memberships.map((m) => ({
           committeeId: m.committeeId,
           role: m.role,

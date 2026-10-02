@@ -2,8 +2,6 @@ import { prisma } from "../lib/prisma";
 import { Errors } from "../lib/http";
 import { auditRow } from "./auditService";
 import { createActionPoint } from "./actionService";
-import type { MinutesSource } from "@prisma/client";
-
 export interface ImportActionDraft {
   title: string;
   description?: string;
@@ -18,12 +16,15 @@ export interface ImportActionDraft {
 export interface ImportMinutesInput {
   meetingId: number;
   discussion: string;
-  documentUrl?: string;
-  sourcePopulation?: MinutesSource;
   actions: ImportActionDraft[];
   createdById: number;
   /** If true, only resolve/create actions — do not create minutes pack */
   actionsOnly?: boolean;
+  /**
+   * When true and a DRAFT already exists for the meeting, replace it.
+   * Without this flag, import fails with a conflict if draft (or final) minutes exist.
+   */
+  replaceExisting?: boolean;
 }
 
 function normalizeTitle(title: string): string {
@@ -92,14 +93,36 @@ export async function importMinutesWithActions(input: ImportMinutesInput) {
   if (!meeting) throw Errors.notFound("Meeting");
 
   if (!input.actionsOnly) {
-    const existingMinutes = await prisma.meetingMinutes.findUnique({
-      where: { meetingId: input.meetingId },
-    });
-    if (existingMinutes) {
-      throw Errors.conflict("This meeting already has minutes. Only one minutes pack is allowed per meeting.");
-    }
     if (!input.discussion?.trim()) {
       throw Errors.badRequest("discussion is required when importing minutes.");
+    }
+
+    const existing = await prisma.meetingMinutes.findMany({
+      where: {
+        meetingId: input.meetingId,
+        status: { in: ["DRAFT", "FINAL"] },
+      },
+      select: { id: true, status: true, filename: true },
+    });
+    const hasDraft = existing.some((m) => m.status === "DRAFT");
+    const hasFinal = existing.some((m) => m.status === "FINAL");
+
+    if ((hasDraft || hasFinal) && !input.replaceExisting) {
+      const parts: string[] = [];
+      if (hasDraft) parts.push("draft");
+      if (hasFinal) parts.push("final");
+      throw Errors.conflict(
+        `This meeting already has ${parts.join(" and ")} minutes. ` +
+          `Confirm that you want to replace them, or cancel the import.`,
+      );
+    }
+
+    if (input.replaceExisting && hasDraft) {
+      const draft = existing.find((m) => m.status === "DRAFT");
+      if (draft) {
+        await prisma.minuteActionSnapshot.deleteMany({ where: { minutesId: draft.id } });
+        await prisma.meetingMinutes.delete({ where: { id: draft.id } });
+      }
     }
   }
 
@@ -199,9 +222,7 @@ export async function importMinutesWithActions(input: ImportMinutesInput) {
     const row = await tx.meetingMinutes.create({
       data: {
         meetingId: input.meetingId,
-        sourcePopulation: input.sourcePopulation ?? "LATEST_MEETING",
         discussion: input.discussion.trim(),
-        documentUrl: input.documentUrl,
         createdById: input.createdById,
         status: "DRAFT",
       },

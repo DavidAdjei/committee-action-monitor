@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ListChecks } from "lucide-react";
 import { Modal, ModalActions } from "@/components/Modal";
 import { MultiStakeholderPicker } from "@/components/MultiStakeholderPicker";
@@ -26,8 +26,7 @@ export function NewActionModal({
   const [meetingId, setMeetingId] = useState<number | "">("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [owner, setOwner] = useState<DirectoryUser | null>(null);
-  const [ownerCandidates, setOwnerCandidates] = useState<DirectoryUser[]>([]);
+  const [owners, setOwners] = useState<DirectoryUser[]>([]);
   const [deadline, setDeadline] = useState("");
   const [minutesReference, setMinutesReference] = useState("");
   const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "CRITICAL">("MEDIUM");
@@ -35,29 +34,23 @@ export function NewActionModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const ownerIds = useMemo(() => owners.map((o) => o.id), [owners]);
+
   useEffect(() => {
     let cancelled = false;
 
     const loadData = async () => {
       try {
-        const [meetingData, directoryData] = await Promise.all([
-          endpoints.meetings(committeeId),
-          endpoints.directory(""),
-        ]);
-
+        const meetingData = await endpoints.meetings(committeeId);
+        if (!cancelled) setMeetings(meetingData);
+      } catch (err: unknown) {
         if (!cancelled) {
-          setMeetings(meetingData);
-          setOwnerCandidates(directoryData);
-        }
-      } catch (err: any) {
-        if (!cancelled) {
-          setError(err.message ?? "Could not load form data.");
+          setError((err as Error)?.message ?? "Could not load form data.");
         }
       }
     };
 
-    loadData();
-
+    void loadData();
     return () => {
       cancelled = true;
     };
@@ -65,7 +58,11 @@ export function NewActionModal({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!meetingId || !owner || !deadline) return;
+    if (!meetingId || !deadline) return;
+    if (owners.length === 0) {
+      setError("Select at least one action owner.");
+      return;
+    }
     if (!canCreateAction(me, committeeId)) {
       setError("Only the committee Chairperson or Secretary may create action points.");
       return;
@@ -73,17 +70,23 @@ export function NewActionModal({
     setSubmitting(true);
     setError(null);
     try {
+      const ids = owners.map((o) => o.id);
       await endpoints.createAction(committeeId, {
         meetingId: Number(meetingId),
         title,
         description: description || undefined,
-        ownerId: owner.id,
+        ownerId: ids[0],
+        ownerIds: ids,
         deadline,
         priority,
         minutesReference: minutesReference || undefined,
         additionalStakeholderIds: stakeholders.map((s) => s.id),
       });
-      flash("Action point saved and stakeholders notified");
+      flash(
+        owners.length > 1
+          ? `Action point saved with ${owners.length} owners; stakeholders notified`
+          : "Action point saved and stakeholders notified",
+      );
       onCreated();
       onClose();
     } catch (err: unknown) {
@@ -143,22 +146,12 @@ export function NewActionModal({
           </label>
         </div>
 
-        <label className="field-label">
-          Action owner
-          <select
-            required
-            className="field-input"
-            value={owner?.id ?? ""}
-            onChange={(e) => setOwner(ownerCandidates.find((c) => c.id === Number(e.target.value)) ?? null)}
-          >
-            <option value="">Search or select from Entra ID</option>
-            {ownerCandidates.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.fullName} · {c.department}
-              </option>
-            ))}
-          </select>
-        </label>
+        <MultiStakeholderPicker
+          label="Action owners"
+          helpText="Type to search the directory. Add one or more people responsible for this action. The first selected is stored as the primary owner."
+          selected={owners}
+          onChange={setOwners}
+        />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="field-label">
@@ -185,7 +178,9 @@ export function NewActionModal({
             <option value="HIGH">High</option>
             <option value="CRITICAL">Critical</option>
           </select>
-          <small className="font-normal text-slate-400">Used on the Central Committee dashboard and escalation radar.</small>
+          <small className="font-normal text-slate-400">
+            Used on the Central Committee dashboard and escalation radar.
+          </small>
         </label>
 
         <label className="field-label">
@@ -199,21 +194,27 @@ export function NewActionModal({
           />
         </label>
 
-        <MultiStakeholderPicker selected={stakeholders} onChange={setStakeholders} />
+        <MultiStakeholderPicker
+          label="Additional stakeholders"
+          helpText="Optional people to notify who are not action owners."
+          selected={stakeholders}
+          onChange={setStakeholders}
+          excludeIds={ownerIds}
+        />
 
-        <div className="flex items-center gap-2 rounded-lg bg-blue-50 p-3 text-xs text-blue-800">
+        <div className="flex items-center gap-2 rounded-lg bg-blue-50 p-3 text-xs text-blue-800 dark:bg-blue-950 dark:text-blue-200">
           <ListChecks className="h-4 w-4 shrink-0" />
           The meeting reference, meeting date and minutes item will be retained with this action throughout its
           lifecycle.
         </div>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
         <ModalActions>
           <button type="button" className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn-primary" disabled={submitting}>
+          <button type="submit" className="btn-primary" disabled={submitting || owners.length === 0}>
             {submitting ? "Saving…" : "Save & notify"}
           </button>
         </ModalActions>

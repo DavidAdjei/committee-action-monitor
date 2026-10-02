@@ -9,6 +9,10 @@
     "ENTRA_GRAPH_TENANT_ID": "",
     "ENTRA_GRAPH_CLIENT_ID": "",
     "ENTRA_GRAPH_CLIENT_SECRET": "",
+    "ENTRA_GRAPH_MAIL_SENDER": "",
+    "ENTRA_GRAPH_DELEGATED_SCOPES": "https://graph.microsoft.com/OnlineMeetings.ReadWrite offline_access",
+    "APP_PUBLIC_URL": "http://localhost:5173",
+    "MAIL_DEV_LOG": "true",
     "EVIDENCE_STORAGE_CONNECTION_STRING": "",
     "EVIDENCE_STORAGE_CONTAINER": "evidence"
   },

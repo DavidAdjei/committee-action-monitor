@@ -1,19 +1,28 @@
 /**
- * Create Microsoft Teams online meetings via Graph (application permissions).
+ * Microsoft Teams online meetings via Graph.
  *
- * Required: OnlineMeetings.ReadWrite.All (Application) + admin consent.
- * Organizer is the meeting creator when they have an Entra identity;
- * optional fallback: ENTRA_GRAPH_TEAMS_ORGANIZER (UPN or email of a licensed mailbox).
+ * Modes:
+ * - **delegated** (interactive UI): OnlineMeetings.ReadWrite → POST /me/onlineMeetings
+ * - **application** (jobs / timers / no user context): OnlineMeetings.ReadWrite.All
+ *   → POST /users/{organizer}/onlineMeetings (+ Application Access Policy as required by tenant)
  */
 
 import { prisma } from "../lib/prisma";
 import { Errors } from "../lib/http";
-import { graphEnv, graphFetch, isGraphAppConfigured } from "../lib/graphClient";
+import {
+  graphEnv,
+  graphFetch,
+  isGraphAppConfigured,
+  resolveDelegatedGraphToken,
+} from "../lib/graphClient";
+
+export type TeamsAuthMode = "delegated" | "application";
 
 export type TeamsMeetingResult = {
   id: string;
   joinUrl: string;
   organizerUpn: string;
+  authMode: TeamsAuthMode;
 };
 
 type GraphOnlineMeeting = {
@@ -23,8 +32,7 @@ type GraphOnlineMeeting = {
 };
 
 /**
- * Resolve Graph user id / UPN for the organizer.
- * Prefer creator's entraObjectId, then email; else shared fallback mailbox.
+ * Resolve Graph user id / UPN for application-mode organizer.
  */
 export async function resolveOrganizerIdentity(createdById: number): Promise<{
   graphUserPath: string;
@@ -50,8 +58,7 @@ export async function resolveOrganizerIdentity(createdById: number): Promise<{
     };
   }
 
-  const fallback =
-    graphEnv("ENTRA_GRAPH_TEAMS_ORGANIZER", ["GRAPH_TEAMS_ORGANIZER"]) ?? null;
+  const fallback = graphEnv("ENTRA_GRAPH_TEAMS_ORGANIZER", ["GRAPH_TEAMS_ORGANIZER"]) ?? null;
   if (fallback) {
     return {
       graphUserPath: `/users/${encodeURIComponent(fallback)}`,
@@ -62,10 +69,10 @@ export async function resolveOrganizerIdentity(createdById: number): Promise<{
   return null;
 }
 
-/**
- * Collect attendee emails for the committee (members + officers).
- */
-async function committeeAttendeeEmails(committeeId: number, excludeEmail?: string | null): Promise<string[]> {
+async function committeeAttendeeEmails(
+  committeeId: number,
+  excludeEmail?: string | null,
+): Promise<string[]> {
   const committee = await prisma.committee.findUnique({
     where: { id: committeeId },
     select: {
@@ -97,11 +104,103 @@ async function committeeAttendeeEmails(committeeId: number, excludeEmail?: strin
   return [...set];
 }
 
+function meetingPayload(params: {
+  title: string;
+  startsAt: Date;
+  endsAt?: Date | null;
+  agenda?: string | null;
+  attendeeEmails?: string[];
+}): Record<string, unknown> {
+  const end =
+    params.endsAt && params.endsAt > params.startsAt
+      ? params.endsAt
+      : new Date(params.startsAt.getTime() + 60 * 60 * 1000);
+
+  const body: Record<string, unknown> = {
+    subject: params.title,
+    startDateTime: params.startsAt.toISOString(),
+    endDateTime: end.toISOString(),
+  };
+
+  if (params.attendeeEmails && params.attendeeEmails.length > 0) {
+    body.participants = {
+      attendees: params.attendeeEmails.map((upn) => ({
+        upn,
+        role: "attendee",
+        identity: { user: { id: upn } },
+      })),
+    };
+  }
+
+  return body;
+}
+
 /**
- * Create a Teams online meeting under the organizer's identity.
- * Does not throw for non-config cases when optional — caller decides.
+ * Interactive create: delegated OnlineMeetings.ReadWrite as the signed-in user.
+ * Calls POST /me/onlineMeetings — no Application Access Policy required for the user themselves.
  */
-export async function createTeamsOnlineMeeting(params: {
+export async function createTeamsOnlineMeetingDelegated(params: {
+  committeeId: number;
+  title: string;
+  startsAt: Date;
+  endsAt?: Date | null;
+  createdById: number;
+  agenda?: string | null;
+  /** API bearer token (for OBO) and/or a Graph token with OnlineMeetings.ReadWrite */
+  apiAccessToken?: string | null;
+  graphAccessToken?: string | null;
+}): Promise<TeamsMeetingResult> {
+  const accessToken = await resolveDelegatedGraphToken({
+    apiAccessToken: params.apiAccessToken,
+    graphAccessToken: params.graphAccessToken,
+  });
+
+  const creator = await prisma.user.findUnique({
+    where: { id: params.createdById },
+    select: { email: true, fullName: true },
+  });
+  const attendeeEmails = await committeeAttendeeEmails(params.committeeId, creator?.email);
+  const body = meetingPayload({
+    title: params.title,
+    startsAt: params.startsAt,
+    endsAt: params.endsAt,
+    agenda: params.agenda,
+    attendeeEmails,
+  });
+
+  const res = await graphFetch(`/me/onlineMeetings`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    accessToken,
+  });
+
+  if (!res.ok) {
+    const t = await res.text();
+    throw Errors.badRequest(
+      `Teams online meeting (delegated) failed: ${res.status} ${t.slice(0, 400)}. ` +
+        `Ensure the user has a Teams license and OnlineMeetings.ReadWrite is consented.`,
+    );
+  }
+
+  const json = (await res.json()) as GraphOnlineMeeting;
+  const joinUrl = json.joinWebUrl || json.joinUrl;
+  if (!json.id || !joinUrl) {
+    throw Errors.badRequest("Graph returned an online meeting without id or join URL.");
+  }
+
+  return {
+    id: json.id,
+    joinUrl,
+    organizerUpn: creator?.email || creator?.fullName || "me",
+    authMode: "delegated",
+  };
+}
+
+/**
+ * Background / job create: application OnlineMeetings.ReadWrite.All.
+ * Calls POST /users/{organizer}/onlineMeetings — may require Application Access Policy.
+ */
+export async function createTeamsOnlineMeetingApplication(params: {
   committeeId: number;
   title: string;
   startsAt: Date;
@@ -118,97 +217,66 @@ export async function createTeamsOnlineMeeting(params: {
   const organizer = await resolveOrganizerIdentity(params.createdById);
   if (!organizer) {
     throw Errors.badRequest(
-      "Cannot create a Teams meeting: the creator has no Entra identity linked, " +
+      "Cannot create a Teams meeting (application): the organizer has no Entra identity linked, " +
         "and ENTRA_GRAPH_TEAMS_ORGANIZER is not set.",
     );
   }
-
-  const end =
-    params.endsAt && params.endsAt > params.startsAt
-      ? params.endsAt
-      : new Date(params.startsAt.getTime() + 60 * 60 * 1000);
 
   const creator = await prisma.user.findUnique({
     where: { id: params.createdById },
     select: { email: true },
   });
   const attendeeEmails = await committeeAttendeeEmails(params.committeeId, creator?.email);
-
-  const body = {
-    subject: params.title,
-    startDateTime: params.startsAt.toISOString(),
-    endDateTime: end.toISOString(),
-    participants: {
-      attendees: attendeeEmails.map((upn) => ({
-        identity: {
-          user: {
-            // Graph accepts id or UPN in various shapes; upn is reliable for bank tenants
-            id: upn,
-          },
-        },
-        upn,
-        role: "attendee",
-      })),
-    },
-    // Optional description from agenda
-    ...(params.agenda
-      ? {
-          // onlineMeeting supports lobbyBypassSettings etc.; body is not always applied —
-          // subject + times are the critical fields for join URL.
-        }
-      : {}),
-  };
-
-  // Prefer simpler payload — Graph onlineMeetings attendees shape varies by API version.
-  // Minimal reliable payload:
-  const minimalBody: Record<string, unknown> = {
-    subject: params.title,
-    startDateTime: params.startsAt.toISOString(),
-    endDateTime: end.toISOString(),
-  };
-
-  // Include attendees when we have emails (best-effort; Graph may ignore unknown users)
-  if (attendeeEmails.length > 0) {
-    minimalBody.participants = {
-      attendees: attendeeEmails.map((email) => ({
-        upn: email,
-        role: "attendee",
-      })),
-    };
-  }
-
-  void body; // reserved if we expand later
+  const body = meetingPayload({
+    title: params.title,
+    startsAt: params.startsAt,
+    endsAt: params.endsAt,
+    agenda: params.agenda,
+    attendeeEmails,
+  });
 
   const res = await graphFetch(`${organizer.graphUserPath}/onlineMeetings`, {
     method: "POST",
-    body: JSON.stringify(minimalBody),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const t = await res.text();
     throw Errors.badRequest(
-      `Teams online meeting creation failed: ${res.status} ${t.slice(0, 400)}. ` +
+      `Teams online meeting (application) failed: ${res.status} ${t.slice(0, 400)}. ` +
         `Organizer: ${organizer.label}. ` +
-        `Ensure OnlineMeetings.ReadWrite.All is granted and the organizer has a Teams license.`,
+        `Ensure OnlineMeetings.ReadWrite.All is granted and an Application Access Policy allows this app on the organizer.`,
     );
   }
 
   const json = (await res.json()) as GraphOnlineMeeting;
   const joinUrl = json.joinWebUrl || json.joinUrl;
   if (!json.id || !joinUrl) {
-    throw Errors.badRequest("Graph online meeting response missing id or joinWebUrl.");
+    throw Errors.badRequest("Graph returned an online meeting without id or join URL.");
   }
 
   return {
     id: json.id,
     joinUrl,
     organizerUpn: organizer.label,
+    authMode: "application",
   };
 }
 
+/** @deprecated Prefer createTeamsOnlineMeetingApplication or Delegated */
+export async function createTeamsOnlineMeeting(params: {
+  committeeId: number;
+  title: string;
+  startsAt: Date;
+  endsAt?: Date | null;
+  createdById: number;
+  agenda?: string | null;
+}): Promise<TeamsMeetingResult> {
+  return createTeamsOnlineMeetingApplication(params);
+}
+
 /**
- * Best-effort Teams provision: never fails the parent meeting create.
- * Returns null if Teams was not requested, not configured, or Graph failed.
+ * Interactive HTTP create: prefer delegated, optional fallback to application.
  */
 export async function tryProvisionTeamsForMeeting(params: {
   meetingId: number;
@@ -219,24 +287,69 @@ export async function tryProvisionTeamsForMeeting(params: {
   createdById: number;
   agenda?: string | null;
   teamsRequested: boolean;
-}): Promise<{ teamsEventId: string; teamsJoinUrl: string; organizerUpn: string } | null> {
+  /** Prefer delegated when the user is creating the meeting in the UI */
+  authMode?: TeamsAuthMode;
+  apiAccessToken?: string | null;
+  graphAccessToken?: string | null;
+  /** If delegated fails, try application (default true for resilience) */
+  allowApplicationFallback?: boolean;
+}): Promise<{
+  teamsEventId: string;
+  teamsJoinUrl: string;
+  organizerUpn: string;
+  authMode: TeamsAuthMode;
+} | null> {
   if (!params.teamsRequested) return null;
-  if (!isGraphAppConfigured()) {
-    console.warn(
-      `[teams] Meeting ${params.meetingId}: teamsRequested but Graph is not configured; join URL not created.`,
-    );
-    return null;
-  }
+
+  const mode: TeamsAuthMode = params.authMode ?? "delegated";
+  const allowFallback = params.allowApplicationFallback !== false;
 
   try {
-    const result = await createTeamsOnlineMeeting({
-      committeeId: params.committeeId,
-      title: params.title,
-      startsAt: params.startsAt,
-      endsAt: params.endsAt,
-      createdById: params.createdById,
-      agenda: params.agenda,
-    });
+    let result: TeamsMeetingResult;
+
+    if (mode === "delegated") {
+      try {
+        result = await createTeamsOnlineMeetingDelegated({
+          committeeId: params.committeeId,
+          title: params.title,
+          startsAt: params.startsAt,
+          endsAt: params.endsAt,
+          createdById: params.createdById,
+          agenda: params.agenda,
+          apiAccessToken: params.apiAccessToken,
+          graphAccessToken: params.graphAccessToken,
+        });
+      } catch (delegatedErr) {
+        if (!allowFallback || !isGraphAppConfigured()) throw delegatedErr;
+        console.warn(
+          `[teams] Meeting ${params.meetingId}: delegated provision failed, trying application — ` +
+            (delegatedErr instanceof Error ? delegatedErr.message : String(delegatedErr)),
+        );
+        result = await createTeamsOnlineMeetingApplication({
+          committeeId: params.committeeId,
+          title: params.title,
+          startsAt: params.startsAt,
+          endsAt: params.endsAt,
+          createdById: params.createdById,
+          agenda: params.agenda,
+        });
+      }
+    } else {
+      if (!isGraphAppConfigured()) {
+        console.warn(
+          `[teams] Meeting ${params.meetingId}: application mode but Graph is not configured.`,
+        );
+        return null;
+      }
+      result = await createTeamsOnlineMeetingApplication({
+        committeeId: params.committeeId,
+        title: params.title,
+        startsAt: params.startsAt,
+        endsAt: params.endsAt,
+        createdById: params.createdById,
+        agenda: params.agenda,
+      });
+    }
 
     await prisma.meeting.update({
       where: { id: params.meetingId },
@@ -250,10 +363,41 @@ export async function tryProvisionTeamsForMeeting(params: {
       teamsEventId: result.id,
       teamsJoinUrl: result.joinUrl,
       organizerUpn: result.organizerUpn,
+      authMode: result.authMode,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[teams] Meeting ${params.meetingId}: provision failed — ${msg}`);
     return null;
   }
+}
+
+/**
+ * Job/timer path: always application permissions.
+ */
+export async function provisionTeamsForMeetingAsApplication(params: {
+  meetingId: number;
+  committeeId: number;
+  title: string;
+  startsAt: Date;
+  endsAt?: Date | null;
+  createdById: number;
+  agenda?: string | null;
+}): Promise<{
+  teamsEventId: string;
+  teamsJoinUrl: string;
+  organizerUpn: string;
+  authMode: "application";
+} | null> {
+  return tryProvisionTeamsForMeeting({
+    ...params,
+    teamsRequested: true,
+    authMode: "application",
+    allowApplicationFallback: false,
+  }) as Promise<{
+    teamsEventId: string;
+    teamsJoinUrl: string;
+    organizerUpn: string;
+    authMode: "application";
+  } | null>;
 }

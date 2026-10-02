@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { Errors } from "../lib/http";
-import { buildActionNotifications } from "./notificationService";
+import { buildActionNotifications, triggerEmailDispatchAsync } from "./notificationService";
 import { auditRow } from "./auditService";
 import type { ActionStatus, StakeholderType } from "@prisma/client";
 
@@ -83,7 +83,7 @@ export async function createActionPoint(input: CreateActionPointInput) {
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
   try {
-  return await prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const referenceNo = await nextReferenceNo(tx);
     const action = await tx.actionPoint.create({
       data: {
@@ -154,6 +154,8 @@ export async function createActionPoint(input: CreateActionPointInput) {
 
     return action;
   });
+    triggerEmailDispatchAsync();
+    return created;
   } catch (err) {
     if (isUniqueConflict(err) && attempt < maxAttempts - 1) {
       continue;
@@ -195,11 +197,11 @@ export async function recordActionUpdate(input: RecordActionUpdateInput) {
   }
 
   // "Completed" in the UI means the owner asserts completion; the record is
-  // held at Pending Verification until the Chairperson/Secretary approves —
-  // per section 3.7 and the action lifecycle table.
+  // held at Pending Verification until the Chairperson/Secretary approves.
+  // Evidence is optional; a completion comment/note is required.
   const assertingComplete = input.status === "COMPLETED";
-  if (assertingComplete && !input.evidenceLink && !(input.evidenceFiles && input.evidenceFiles.length)) {
-    throw Errors.badRequest("Evidence (a file or a link) is required to submit a completed action.");
+  if (assertingComplete && !(input.note && input.note.trim())) {
+    throw Errors.badRequest("A completion comment is required when marking an action as completed.");
   }
   const nextStatus: ActionStatus = assertingComplete ? "PENDING_VERIFICATION" : input.status;
 
@@ -210,7 +212,7 @@ export async function recordActionUpdate(input: RecordActionUpdateInput) {
     );
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const update = await tx.actionUpdate.create({
       data: {
         actionPointId: input.actionPointId,
@@ -285,6 +287,8 @@ export async function recordActionUpdate(input: RecordActionUpdateInput) {
 
     return updated;
   });
+  triggerEmailDispatchAsync();
+  return result;
 }
 
 /**
@@ -306,17 +310,13 @@ export async function verifyActionEvidence(params: {
   }
 
   if (params.approve) {
-    // Completion evidence must be present and not infected (docs §3.7 / §9).
+    // Evidence is optional. When files were uploaded, they must not be infected.
     const latestWithFiles = await prisma.actionUpdate.findFirst({
       where: { actionPointId: params.actionPointId },
       orderBy: { createdAt: "desc" },
       include: { evidenceFiles: true },
     });
     const files = latestWithFiles?.evidenceFiles ?? [];
-    const hasLink = Boolean(latestWithFiles?.evidenceLink);
-    if (files.length === 0 && !hasLink) {
-      throw Errors.badRequest("Cannot approve completion without evidence files or an evidence link.");
-    }
     if (files.some((f) => f.scanResult === "INFECTED")) {
       throw Errors.conflict("Cannot approve while evidence failed malware scanning.");
     }
@@ -338,7 +338,7 @@ export async function verifyActionEvidence(params: {
     );
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.actionPoint
       .update({
         where: { id: action.id, version: expectedVersion },
@@ -386,6 +386,8 @@ export async function verifyActionEvidence(params: {
 
     return updated;
   });
+  triggerEmailDispatchAsync();
+  return result;
 }
 
 /**
@@ -414,7 +416,7 @@ export async function reopenAction(params: {
     );
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     await tx.actionUpdate.create({
       data: {
         actionPointId: params.actionPointId,
@@ -468,6 +470,8 @@ export async function reopenAction(params: {
 
     return updated;
   });
+  triggerEmailDispatchAsync();
+  return result;
 }
 
 /**
