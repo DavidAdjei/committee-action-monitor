@@ -63,6 +63,14 @@ export function isCentralAdministrator(user: User): boolean {
 }
 
 /**
+ * Bank-wide oversight views (global dashboard, all-committee reports).
+ * Platform (super) admins and any Central Committee member.
+ */
+export function canViewBankWide(user: User): boolean {
+  return isPlatformAdmin(user) || isCentralMember(user);
+}
+
+/**
  * Officer writes (meetings, minutes, actions, verification):
  * platform admin, or active Chair/Secretary of that committee.
  * Central administrators are view-only unless they hold an officer seat.

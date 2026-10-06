@@ -1,5 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { prisma } from "../lib/prisma";
+import { canViewBankWide } from "../lib/authorize";
 import { requireUser } from "../lib/auth";
 import { ok, errorResponse, preflight, Errors } from "../lib/http";
 
@@ -40,7 +41,7 @@ async function listAllActions(req: HttpRequest, _ctx: InvocationContext): Promis
         : {}),
     };
 
-    if (user.isCentralCommittee || user.isAdmin) {
+    if (canViewBankWide(user)) {
       if (committeeId) where.committeeId = committeeId;
     } else {
       // Personal worklist: actions assigned to this user as owner

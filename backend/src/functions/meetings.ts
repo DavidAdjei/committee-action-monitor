@@ -95,6 +95,11 @@ async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): 
       (body as { graphAccessToken?: string }).graphAccessToken ??
       null;
 
+    console.log(
+      `[teams] HTTP createMeeting: meetingId=${meeting.id} teamsRequested=${teamsRequested} ` +
+        `userId=${user.id} hasGraphHeader=${Boolean(graphAccessToken)} hasBearer=${Boolean(apiAccessToken)}`,
+    );
+
     const teams = await tryProvisionTeamsForMeeting({
       meetingId: meeting.id,
       committeeId,
@@ -110,14 +115,31 @@ async function createMeetingHandler(req: HttpRequest, _ctx: InvocationContext): 
       allowApplicationFallback: true,
     });
 
+    const joinUrl = teams.teamsJoinUrl ?? meeting.teamsJoinUrl ?? null;
+    if (teamsRequested) {
+      if (joinUrl) {
+        console.log(
+          `[teams] HTTP createMeeting RESULT success meetingId=${meeting.id} mode=${teams.authMode ?? "?"} joinUrl=yes`,
+        );
+      } else {
+        console.error(
+          `[teams] HTTP createMeeting RESULT failed meetingId=${meeting.id} attempted=${teams.attempted} error=${teams.error ?? "unknown"}`,
+        );
+      }
+    } else {
+      console.log(`[teams] HTTP createMeeting RESULT skipped (checkbox off) meetingId=${meeting.id}`);
+    }
+
     return ok(
       {
         ...meeting,
-        teamsEventId: teams?.teamsEventId ?? meeting.teamsEventId,
-        teamsJoinUrl: teams?.teamsJoinUrl ?? meeting.teamsJoinUrl,
-        teamsProvisioned: Boolean(teams?.teamsJoinUrl),
-        teamsOrganizer: teams?.organizerUpn ?? null,
-        teamsAuthMode: teams?.authMode ?? null,
+        teamsEventId: teams.teamsEventId ?? meeting.teamsEventId,
+        teamsJoinUrl: joinUrl,
+        teamsProvisioned: Boolean(joinUrl),
+        teamsOrganizer: teams.organizerUpn ?? null,
+        teamsAuthMode: teams.authMode ?? null,
+        teamsAttempted: Boolean(teamsRequested && teams.attempted),
+        teamsError: teams.error ?? null,
       },
       201,
     );
@@ -374,19 +396,39 @@ async function listMyMeetings(req: HttpRequest, _ctx: InvocationContext): Promis
     if (from && Number.isNaN(from.getTime())) throw Errors.badRequest("Invalid from date.");
     if (to && Number.isNaN(to.getTime())) throw Errors.badRequest("Invalid to date.");
 
-    const memberships = await prisma.committeeMembership.findMany({
-      where: { userId: user.id, active: true },
-      select: { committeeId: true },
-    });
-    const committeeIds = memberships.map((m) => m.committeeId);
-
-    if (committeeIds.length === 0) {
-      return ok([]);
+    // Platform admins see all meetings; others see committees they belong to
+    // (plus committees they chair/secretarie as membership may lag).
+    let committeeFilter: { committeeId?: { in: number[] } } = {};
+    if (!user.isAdmin) {
+      const memberships = await prisma.committeeMembership.findMany({
+        where: { userId: user.id, active: true },
+        select: { committeeId: true },
+      });
+      const officerCommittees = await prisma.committee.findMany({
+        where: {
+          OR: [
+            { chairpersonId: user.id },
+            { secretaryId: user.id },
+            { centralRepId: user.id },
+          ],
+        },
+        select: { id: true },
+      });
+      const committeeIds = [
+        ...new Set([
+          ...memberships.map((m) => m.committeeId),
+          ...officerCommittees.map((c) => c.id),
+        ]),
+      ];
+      if (committeeIds.length === 0) {
+        return ok([]);
+      }
+      committeeFilter = { committeeId: { in: committeeIds } };
     }
 
     const meetings = await prisma.meeting.findMany({
       where: {
-        committeeId: { in: committeeIds },
+        ...committeeFilter,
         ...(from || to
           ? {
               startsAt: {

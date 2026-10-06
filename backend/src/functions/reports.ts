@@ -1,6 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { requireUser } from "../lib/auth";
-import { loadMemberships, isCentralMember } from "../lib/authorize";
+import { loadMemberships, isCentralMember, canViewBankWide, isPlatformAdmin } from "../lib/authorize";
 import { ok, errorResponse, preflight, Errors, corsHeaders } from "../lib/http";
 import { bankWideDashboard, committeeSummary } from "../services/reportService";
 import { prisma } from "../lib/prisma";
@@ -9,8 +9,10 @@ async function dashboard(req: HttpRequest, _ctx: InvocationContext): Promise<Htt
   if (req.method === "OPTIONS") return preflight();
   try {
     const user = await requireUser(req);
-    if (!isCentralMember(user)) {
-      throw Errors.forbidden("The bank-wide dashboard is available to Central Committee Members and Administrators only.");
+    if (!canViewBankWide(user)) {
+      throw Errors.forbidden(
+        "The bank-wide dashboard is available to platform administrators and Central Committee members only.",
+      );
     }
     return ok(await bankWideDashboard());
   } catch (err) {
@@ -23,7 +25,7 @@ async function summary(req: HttpRequest, _ctx: InvocationContext): Promise<HttpR
   try {
     const user = await requireUser(req);
     const memberships = await loadMemberships(user.id);
-    const ids = isCentralMember(user) ? undefined : memberships.map((m) => m.committeeId);
+    const ids = canViewBankWide(user) ? undefined : memberships.map((m) => m.committeeId);
     return ok(await committeeSummary(ids));
   } catch (err) {
     return errorResponse(err);
@@ -50,11 +52,11 @@ async function actionsExport(req: HttpRequest, _ctx: InvocationContext): Promise
   try {
     const user = await requireUser(req);
     const memberships = await loadMemberships(user.id);
-    const permittedIds = isCentralMember(user)
+    const permittedIds = canViewBankWide(user)
       ? undefined
       : memberships.map((m) => m.committeeId);
 
-    if (!isCentralMember(user) && (!permittedIds || permittedIds.length === 0)) {
+    if (!canViewBankWide(user) && (!permittedIds || permittedIds.length === 0)) {
       return {
         status: 200,
         body: "referenceNo,title,committee,committeeCode,owner,status,priority,progress,deadline,dateRaised,revisedDeadline\n",

@@ -11,6 +11,7 @@ import Committees from "@/pages/Committees";
 import CommitteeWorkspace from "@/pages/CommitteeWorkspace";
 import ActionPoints from "@/pages/ActionPoints";
 import Notifications from "@/pages/Notifications";
+import MeetingDetailPage from "@/pages/MeetingDetail";
 import CalendarPage from "@/pages/Calendar";
 import { LoadingLogo } from "@/components/LoadingLogo";
 import { isEntraConfigured } from "@/auth/msalConfig";
@@ -145,6 +146,14 @@ export default function App() {
         element={
           <RequireAuth>
             <Notifications />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/meetings/:meetingId"
+        element={
+          <RequireAuth>
+            <MeetingDetailPage />
           </RequireAuth>
         }
       />

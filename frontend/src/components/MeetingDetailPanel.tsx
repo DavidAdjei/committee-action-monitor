@@ -190,7 +190,7 @@ export function MeetingDetailPanel({
             <b>{detail.createdBy.fullName}</b>
             <span className="text-xs text-slate-400"> · {formatDate(detail.createdAt)}</span>
           </div>
-          {detail.teamsJoinUrl && (
+          {detail.teamsJoinUrl ? (
             <div>
               <small className="block text-slate-400">Teams</small>
               <a
@@ -202,7 +202,15 @@ export function MeetingDetailPanel({
                 <Video className="h-4 w-4" /> Join online meeting
               </a>
             </div>
-          )}
+          ) : detail.teamsRequested ? (
+            <div>
+              <small className="block text-slate-400">Teams</small>
+              <p className="text-sm text-amber-700 dark:text-amber-300">
+                Online meeting was requested but no join link was created. Check API logs for Graph
+                errors (consent, Teams license, or application access policy).
+              </p>
+            </div>
+          ) : null}
         </div>
 
         {detail.agenda && (

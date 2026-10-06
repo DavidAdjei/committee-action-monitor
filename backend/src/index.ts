@@ -15,3 +15,4 @@ import "./functions/reports";
 import "./functions/directory";
 import "./functions/dailyReminderTimer";
 import "./functions/audit";
+import "./functions/leave";

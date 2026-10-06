@@ -311,5 +311,27 @@ export const endpoints = {
   dashboard: () => api.get<DashboardSummary>("/reports/dashboard"),
   /** CSV download of the action register (scoped to permitted committees). */
   actionsExport: () => api.download("/reports/actions-export", "action-register.csv"),
+
+  // Organisational leave (view all; create/delete platform admin only)
+  listLeave: (params?: { from?: string; to?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.from) q.set("from", params.from);
+    if (params?.to) q.set("to", params.to);
+    const qs = q.toString();
+    return api.get<
+      {
+        id: number;
+        userId: number;
+        startsOn: string;
+        endsOn: string;
+        note: string | null;
+        user: { id: number; fullName: string; email: string; department?: string | null };
+        createdBy: { id: number; fullName: string };
+      }[]
+    >(`/leave${qs ? `?${qs}` : ""}`);
+  },
+  createLeave: (data: { userId: number; startsOn: string; endsOn: string; note?: string }) =>
+    api.post(`/leave`, data),
+  deleteLeave: (id: number) => api.delete(`/leave/${id}`),
 };
 

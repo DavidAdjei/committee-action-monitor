@@ -24,12 +24,18 @@ import {
   canManageMembers,
 } from "@/lib/permissions";
 // canCreateMinutes still used for canEdit officer gate
-import { MeetingDetailPanel } from "@/components/MeetingDetailPanel";
 import { AttendanceQrProjector } from "@/components/AttendanceQrProjector";
 import type { ActionListItem, CommitteeDetail, Meeting, MeetingMinutes } from "@/types";
 
 const TABS = ["Overview", "Action Points", "Meetings", "Minutes"] as const;
 type Tab = (typeof TABS)[number];
+
+function isMeetingLive(startsAt: string, endsAt?: string | null): boolean {
+  const now = Date.now();
+  const start = new Date(startsAt).getTime();
+  const end = endsAt ? new Date(endsAt).getTime() : start + 3 * 60 * 60 * 1000;
+  return now >= start && now <= end;
+}
 
 export default function CommitteeWorkspace() {
   const { me } = useAuth();
@@ -58,7 +64,6 @@ export default function CommitteeWorkspace() {
   const [minutesList, setMinutesList] = useState<MeetingMinutes[]>([]);
   const [minutesLoading, setMinutesLoading] = useState(false);
   const [openMinutesId, setOpenMinutesId] = useState<number | null>(null);
-  const [openMeetingId, setOpenMeetingId] = useState<number | null>(null);
   const [projectMeeting, setProjectMeeting] = useState<{
     title: string;
     reference: string;
@@ -360,7 +365,7 @@ export default function CommitteeWorkspace() {
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {mode === "live" && canMembers && (
+                        {mode === "live" && canMembers && isMeetingLive(m.startsAt, m.endsAt) && (
                           <button
                             type="button"
                             className="btn text-xs"
@@ -371,7 +376,7 @@ export default function CommitteeWorkspace() {
                             {projectLoadingId === m.id ? "Loading QR…" : "Project attendance QR"}
                           </button>
                         )}
-                        <button type="button" className="btn text-xs" onClick={() => setOpenMeetingId(m.id)}>
+                        <button type="button" className="btn text-xs" onClick={() => navigate(`/meetings/${m.id}`)}>
                           View meeting
                         </button>
                       </div>
@@ -615,7 +620,7 @@ export default function CommitteeWorkspace() {
             <button
               key={m.id}
               type="button"
-              onClick={() => setOpenMeetingId(m.id)}
+              onClick={() => navigate(`/meetings/${m.id}`)}
               className="card flex w-full flex-col gap-2 text-left transition hover:border-brand-300 hover:shadow-md sm:flex-row sm:items-center sm:justify-between"
             >
               <div>
@@ -752,20 +757,6 @@ export default function CommitteeWorkspace() {
         />
       )}
 
-      {openMeetingId && (
-        <MeetingDetailPanel
-          meetingId={openMeetingId}
-          onClose={() => setOpenMeetingId(null)}
-          onOpenAction={(id) => {
-            setOpenMeetingId(null);
-            setOpenActionId(id);
-          }}
-          onOpenMinutes={(id) => {
-            setOpenMeetingId(null);
-            setOpenMinutesId(id);
-          }}
-        />
-      )}
 
       {showSetChair && (
         <SetChairModal

@@ -57,6 +57,8 @@ model User {
   minutesCreated        MeetingMinutes[]
   meetingPapersUploaded MeetingPaper[]
   auditEvents           AuditEvent[]
+  leaveRecords          UserLeave[] @relation("LeaveUser")
+  leaveCreated          UserLeave[] @relation("LeaveCreatedBy")
 
   @@map("users")
 }
@@ -453,6 +455,28 @@ model Notification {
 // ---------------------------------------------------------------------------
 // Audit
 // ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
+// Leave (platform admin managed)
+// ---------------------------------------------------------------------------
+
+model UserLeave {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @map("user_id")
+  startsOn    DateTime @map("starts_on") @db.Date
+  endsOn      DateTime @map("ends_on") @db.Date
+  note        String?  @db.VarChar(500)
+  createdById Int      @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user      User @relation("LeaveUser", fields: [userId], references: [id])
+  createdBy User @relation("LeaveCreatedBy", fields: [createdById], references: [id])
+
+  @@index([startsOn, endsOn])
+  @@index([userId])
+  @@map("user_leave")
+}
 
 model AuditEvent {
   id            Int      @id @default(autoincrement())

@@ -58,29 +58,37 @@ export function CreateMeetingModal({
           (created as { teamsJoinUrl?: string | null }).teamsJoinUrl,
       );
       const teamsAuthMode = (created as { teamsAuthMode?: string | null }).teamsAuthMode;
+      const teamsAttempted = Boolean((created as { teamsAttempted?: boolean }).teamsAttempted);
+      const teamsError = (created as { teamsError?: string | null }).teamsError;
 
       for (const file of papers) {
         await endpoints.uploadMeetingPaper(meetingId, file);
       }
 
-      if (papers.length > 0 && notifyPapers) {
+      if (notifyPapers) {
         try {
           await endpoints.notifyMeetingPapers(meetingId);
         } catch {
-          // Meeting and papers are saved; email is best-effort
+          // Meeting is saved; email is best-effort
         }
       }
+
 
       if (teams) {
         if (provisioned) {
           flash(
             papers.length
-              ? `Meeting created with Teams link (${teamsAuthMode ?? "delegated"}); papers uploaded`
-              : `Meeting created with Microsoft Teams join link (${teamsAuthMode ?? "delegated"})`,
+              ? `Meeting created with Teams link (${teamsAuthMode ?? "ok"}); papers uploaded`
+              : `Meeting created with Microsoft Teams join link (${teamsAuthMode ?? "ok"})`,
           );
         } else {
+          const detail = teamsError
+            ? teamsError.slice(0, 280)
+            : teamsAttempted
+              ? "Teams provisioning ran but returned no join URL."
+              : "Teams provisioning did not run (check teamsRequested / API logs).";
           flash(
-            "Meeting saved — Teams join link could not be created. Check Graph consent (OnlineMeetings.ReadWrite) and that the organizer has a Teams license. The meeting is still available in CAM.",
+            `Meeting saved in CAM, but Teams was not created. ${detail}`,
             "error",
           );
         }
@@ -230,17 +238,15 @@ export function CreateMeetingModal({
               ))}
             </ul>
           )}
-          {papers.length > 0 && (
-            <label className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={notifyPapers}
-                onChange={(e) => setNotifyPapers(e.target.checked)}
-              />
-              Email papers to committee members after the meeting is saved
-            </label>
-          )}
+          <label className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={notifyPapers}
+              onChange={(e) => setNotifyPapers(e.target.checked)}
+            />
+            Email invitation to committee stakeholders (chair, secretary, members) after save — includes Teams link and any papers
+          </label>
         </div>
 
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}

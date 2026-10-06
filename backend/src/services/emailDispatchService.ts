@@ -210,8 +210,11 @@ export function isMailSendConfigured(): boolean {
  * Send one email via Graph as the configured sender mailbox.
  */
 export async function sendGraphMail(params: {
-  toEmail: string;
+  /** Single recipient (legacy) */
+  toEmail?: string;
   toName?: string;
+  /** Multiple recipients — one email to everyone together */
+  toRecipients?: { email: string; name?: string }[];
   subject: string;
   html: string;
   text: string;
@@ -224,20 +227,28 @@ export async function sendGraphMail(params: {
     );
   }
 
+  const recipients =
+    params.toRecipients && params.toRecipients.length > 0
+      ? params.toRecipients
+      : params.toEmail
+        ? [{ email: params.toEmail, name: params.toName }]
+        : [];
+  if (recipients.length === 0) {
+    throw new Error("sendGraphMail requires at least one recipient.");
+  }
+
   const message: Record<string, unknown> = {
     subject: params.subject,
     body: {
       contentType: "HTML",
       content: params.html,
     },
-    toRecipients: [
-      {
-        emailAddress: {
-          address: params.toEmail,
-          name: params.toName || params.toEmail,
-        },
+    toRecipients: recipients.map((r) => ({
+      emailAddress: {
+        address: r.email,
+        name: r.name || r.email,
       },
-    ],
+    })),
   };
 
   if (params.attachments?.length) {
