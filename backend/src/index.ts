@@ -9,7 +9,7 @@ import "./functions/allActions";
 import "./functions/actionDetail";
 import "./functions/actionUpdates";
 import "./functions/evidence";
-import "./functions/notifications";
+import "./functions/notifications"; 
 import "./functions/notificationDispatchTimer";
 import "./functions/reports";
 import "./functions/directory";
