@@ -215,6 +215,8 @@ export async function sendGraphMail(params: {
   toName?: string;
   /** Multiple recipients — one email to everyone together */
   toRecipients?: { email: string; name?: string }[];
+  /** Optional CC list (e.g. Central Committee when enabled) */
+  ccRecipients?: { email: string; name?: string }[];
   subject: string;
   html: string;
   text: string;
@@ -251,6 +253,15 @@ export async function sendGraphMail(params: {
     })),
   };
 
+  if (params.ccRecipients && params.ccRecipients.length > 0) {
+    message.ccRecipients = params.ccRecipients.map((r) => ({
+      emailAddress: {
+        address: r.email,
+        name: r.name || r.email,
+      },
+    }));
+  }
+
   if (params.attachments?.length) {
     message.attachments = params.attachments.map((a) => ({
       "@odata.type": "#microsoft.graph.fileAttachment",
@@ -275,7 +286,38 @@ export async function sendGraphMail(params: {
 }
 
 /**
- * Deliver a single outbox row (EMAIL channel uses Graph; IN_APP is marked delivered).
+ * When true, Central Committee members are CC'd on batched notification emails.
+ * Default OFF so testing does not flood central members — set in local.settings / env:
+ *   EMAIL_CC_CENTRAL_COMMITTEE=true
+ */
+export function isCentralCommitteeCcEnabled(): boolean {
+  const v = (process.env.EMAIL_CC_CENTRAL_COMMITTEE ?? process.env.MAIL_CC_CENTRAL_COMMITTEE ?? "")
+    .trim()
+    .toLowerCase();
+  return v === "true" || v === "1" || v === "yes";
+}
+
+async function loadCentralCommitteeCcList(
+  excludeEmails: Set<string>,
+): Promise<{ email: string; name?: string }[]> {
+  if (!isCentralCommitteeCcEnabled()) return [];
+  const users = await prisma.user.findMany({
+    where: { active: true, isCentralCommittee: true },
+    select: { email: true, fullName: true },
+  });
+  const out: { email: string; name?: string }[] = [];
+  for (const u of users) {
+    if (!u.email || !u.email.includes("@")) continue;
+    const key = u.email.trim().toLowerCase();
+    if (excludeEmails.has(key)) continue;
+    excludeEmails.add(key);
+    out.push({ email: u.email.trim(), name: u.fullName });
+  }
+  return out;
+}
+
+/**
+ * Deliver a single outbox row (legacy path). Prefer batched processPendingEmailQueue.
  */
 export async function deliverNotification(n: {
   id: number;
@@ -285,10 +327,8 @@ export async function deliverNotification(n: {
   actionPointId: number | null;
 }): Promise<void> {
   if (n.channel === "IN_APP" || n.channel === "TEAMS") {
-    // In-app is already visible in the portal once the row exists; mark delivered.
     return;
   }
-
   if (n.channel !== "EMAIL") {
     throw new Error(`Unsupported notification channel: ${n.channel}`);
   }
@@ -297,7 +337,6 @@ export async function deliverNotification(n: {
 
   if (!isMailSendConfigured()) {
     if (process.env.MAIL_DEV_LOG === "true" || process.env.DEV_AUTH_ENABLED === "true") {
-      // eslint-disable-next-line no-console
       console.info(
         `[mail:dev] To=${content.toEmail} Subject=${content.subject}\n${content.text.slice(0, 500)}`,
       );
@@ -308,17 +347,31 @@ export async function deliverNotification(n: {
     );
   }
 
+  const exclude = new Set([content.toEmail.toLowerCase()]);
+  const cc = await loadCentralCommitteeCcList(exclude);
+
   await sendGraphMail({
     toEmail: content.toEmail,
     toName: content.toName,
+    ccRecipients: cc.length ? cc : undefined,
     subject: content.subject,
     html: content.html,
     text: content.text,
   });
 }
 
+type PendingRow = {
+  id: number;
+  recipientId: number;
+  channel: string;
+  notificationType: string;
+  actionPointId: number | null;
+};
+
 /**
- * Process pending outbox rows. Safe to call from a timer or after enqueue.
+ * Process pending outbox rows.
+ * EMAIL rows with the same type + action are sent as ONE message to all recipients (To:),
+ * with optional CC to Central Committee when EMAIL_CC_CENTRAL_COMMITTEE=true.
  */
 export async function processPendingEmailQueue(limit = 100): Promise<{
   sent: number;
@@ -338,29 +391,110 @@ export async function processPendingEmailQueue(limit = 100): Promise<{
   let failed = 0;
   let skipped = 0;
 
-  for (const n of pending) {
+  // IN_APP / TEAMS: mark delivered without mail
+  const nonEmail = pending.filter((n) => n.channel !== "EMAIL");
+  for (const n of nonEmail) {
     try {
-      await deliverNotification({
-        id: n.id,
-        recipientId: n.recipientId,
-        channel: n.channel,
-        notificationType: n.notificationType,
-        actionPointId: n.actionPointId,
-      });
       await prisma.notification.update({
         where: { id: n.id },
         data: { deliveryStatus: "SENT", sentAt: new Date(), errorMessage: null },
       });
       sent += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  const emailRows = pending.filter((n) => n.channel === "EMAIL") as PendingRow[];
+
+  // Group by event so stakeholders share one email
+  const groups = new Map<string, PendingRow[]>();
+  for (const n of emailRows) {
+    const key = `${n.notificationType}::${n.actionPointId ?? "none"}`;
+    const list = groups.get(key) ?? [];
+    list.push(n);
+    groups.set(key, list);
+  }
+
+  for (const [, group] of groups) {
+    try {
+      // Build body from first row (same action / type for whole group)
+      const seed = group[0];
+      const content = await buildEmailContent(seed);
+
+      const users = await prisma.user.findMany({
+        where: { id: { in: group.map((g) => g.recipientId) } },
+        select: { id: true, email: true, fullName: true },
+      });
+      const byId = new Map(users.map((u) => [u.id, u]));
+
+      const toMap = new Map<string, { email: string; name?: string }>();
+      for (const g of group) {
+        const u = byId.get(g.recipientId);
+        if (!u?.email || !u.email.includes("@")) continue;
+        const key = u.email.trim().toLowerCase();
+        if (!toMap.has(key)) {
+          toMap.set(key, { email: u.email.trim(), name: u.fullName });
+        }
+      }
+      const toRecipients = [...toMap.values()];
+      if (toRecipients.length === 0) {
+        throw new Error("No valid email addresses in notification group.");
+      }
+
+      // Multi-recipient greeting (avoid single-person "Hello Alice" when To has many)
+      let html = content.html;
+      let text = content.text;
+      if (toRecipients.length > 1) {
+        html = html.replace(
+          /Hello\s+[^,<]+,/,
+          "Hello,",
+        );
+        text = text.replace(/^Hello [^\n]+,/m, "Hello,");
+      }
+
+      const exclude = new Set(toRecipients.map((r) => r.email.toLowerCase()));
+      const cc = await loadCentralCommitteeCcList(exclude);
+
+      if (!isMailSendConfigured()) {
+        if (process.env.MAIL_DEV_LOG === "true" || process.env.DEV_AUTH_ENABLED === "true") {
+          console.info(
+            `[mail:dev] BATCH To=${toRecipients.map((r) => r.email).join(", ")} ` +
+              `Cc=${cc.map((c) => c.email).join(", ") || "(none — EMAIL_CC_CENTRAL_COMMITTEE off)"} ` +
+              `Subject=${content.subject}`,
+          );
+        } else {
+          throw new Error(
+            "Email is not configured. Set ENTRA_GRAPH_MAIL_SENDER and Graph app credentials (Mail.Send permission).",
+          );
+        }
+      } else {
+        await sendGraphMail({
+          toRecipients,
+          ccRecipients: cc.length ? cc : undefined,
+          subject: content.subject,
+          html,
+          text,
+        });
+        console.info(
+          `[mail] BATCH sent type=${seed.notificationType} action=${seed.actionPointId} ` +
+            `to=${toRecipients.length} cc=${cc.length} ids=${group.map((g) => g.id).join(",")}`,
+        );
+      }
+
+      await prisma.notification.updateMany({
+        where: { id: { in: group.map((g) => g.id) } },
+        data: { deliveryStatus: "SENT", sentAt: new Date(), errorMessage: null },
+      });
+      sent += group.length;
     } catch (err) {
       const msg = String(err).slice(0, 500);
-      await prisma.notification.update({
-        where: { id: n.id },
+      await prisma.notification.updateMany({
+        where: { id: { in: group.map((g) => g.id) } },
         data: { deliveryStatus: "FAILED", errorMessage: msg },
       });
-      failed += 1;
-      // eslint-disable-next-line no-console
-      console.error(`[mail] notification ${n.id} failed:`, msg);
+      failed += group.length;
+      console.error(`[mail] batch failed (${group.length} rows):`, msg);
     }
   }
 

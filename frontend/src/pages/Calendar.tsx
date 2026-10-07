@@ -17,6 +17,7 @@ import { useFlash } from "@/state/toastContext";
 import { ApiClientError } from "@/api/client";
 import { useAuth } from "@/state/authContext";
 import { UserTypeahead } from "@/components/UserTypeahead";
+import type { CommitteeSummary } from "@/types";
 
 type CalMeeting = {
   id: number;
@@ -104,6 +105,29 @@ function leaveStatus(startsOn: string, endsOn: string, todayKey = ymd(new Date()
   return "active";
 }
 
+type WeekBucket = { label: string; start: Date; end: Date };
+
+/** Splits a month into Monday–Sunday week columns (clipped to the month), e.g. "3-9", "10-16" … */
+function buildWeekBuckets(month: Date): WeekBucket[] {
+  const first = startOfMonth(month);
+  const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  const buckets: WeekBucket[] = [];
+  let d = 1;
+  while (d <= daysInMonth) {
+    const date = new Date(first.getFullYear(), first.getMonth(), d);
+    const mondayIndex = (date.getDay() + 6) % 7; // 0 = Monday
+    const daysLeftInWeek = 7 - mondayIndex;
+    const endDay = Math.min(d + daysLeftInWeek - 1, daysInMonth);
+    buckets.push({
+      label: d === endDay ? `${d}` : `${d}-${endDay}`,
+      start: new Date(first.getFullYear(), first.getMonth(), d),
+      end: new Date(first.getFullYear(), first.getMonth(), endDay),
+    });
+    d = endDay + 1;
+  }
+  return buckets;
+}
+
 export default function CalendarPage() {
   const flash = useFlash();
   const { me } = useAuth();
@@ -114,6 +138,15 @@ export default function CalendarPage() {
   const [leave, setLeave] = useState<LeaveRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedKey, setSelectedKey] = useState<string | null>(() => dateKey(new Date()));
+
+  // Team availability — shows the members of one committee at a time. A Central
+  // Committee member sees every committee in the dropdown; everyone else only
+  // sees the committee(s) they belong to (the /committees endpoint already
+  // scopes the list that way).
+  const [committeeOptions, setCommitteeOptions] = useState<CommitteeSummary[]>([]);
+  const [availCommitteeId, setAvailCommitteeId] = useState<number | null>(null);
+  const [availMembers, setAvailMembers] = useState<{ userId: number; fullName: string }[]>([]);
+  const [availLoading, setAvailLoading] = useState(false);
 
   const [showLeaveForm, setShowLeaveForm] = useState(false);
   const [leaveUser, setLeaveUser] = useState<{ id: number; fullName: string; email: string } | null>(null);
@@ -152,6 +185,44 @@ export default function CalendarPage() {
     void load();
   }, [range.from.toISOString(), range.to.toISOString()]);
 
+  // Load the committees this user may view for the availability dropdown, once.
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await endpoints.committees();
+        setCommitteeOptions(list);
+        setAvailCommitteeId((prev) => prev ?? list[0]?.id ?? null);
+      } catch {
+        // Non-critical panel — fail quietly and just show nothing to pick from.
+      }
+    })();
+  }, []);
+
+  // Load the member list for whichever committee is selected in the dropdown.
+  useEffect(() => {
+    if (availCommitteeId == null) {
+      setAvailMembers([]);
+      return;
+    }
+    let cancelled = false;
+    setAvailLoading(true);
+    (async () => {
+      try {
+        const detail = await endpoints.committee(availCommitteeId);
+        if (!cancelled) {
+          setAvailMembers(detail.members.map((m) => ({ userId: m.userId, fullName: m.fullName })));
+        }
+      } catch {
+        if (!cancelled) setAvailMembers([]);
+      } finally {
+        if (!cancelled) setAvailLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [availCommitteeId]);
+
   const byDay = useMemo(() => {
     const map = new Map<string, CalMeeting[]>();
     for (const m of meetings) {
@@ -167,6 +238,7 @@ export default function CalendarPage() {
     leave.filter((r) => r.startsOn <= key && r.endsOn >= key);
 
   const cells = useMemo(() => buildMonthGrid(cursor), [cursor]);
+  const weekBuckets = useMemo(() => buildWeekBuckets(cursor), [cursor]);
   const today = new Date();
   const selectedMeetings = selectedKey ? byDay.get(selectedKey) ?? [] : [];
   const selectedLeave = selectedKey ? leaveOnDay(selectedKey) : [];
@@ -256,34 +328,34 @@ export default function CalendarPage() {
   return (
     <div className="mx-auto max-w-[1400px] space-y-4">
       {/* Header bar */}
-      <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 text-white shadow-lg">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-100 to-slate-50 text-slate-900 shadow-sm dark:border-slate-700 dark:from-slate-800 dark:to-slate-900 dark:text-white">
         <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-white/50">
               Meetings · Leave · Key activities
             </p>
             <h1 className="mt-0.5 flex items-center gap-2 text-xl font-bold tracking-tight sm:text-2xl">
-              <CalendarDays className="h-6 w-6 text-brand-300" />
+              <CalendarDays className="h-6 w-6 text-brand-600 dark:text-brand-300" />
               Organisational calendar
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            <button type="button" className="rounded-lg bg-white/10 px-2.5 py-2 hover:bg-white/15" onClick={() => setCursor((c) => addMonths(c, -1))} aria-label="Previous month">
+            <button type="button" className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700" onClick={() => setCursor((c) => addMonths(c, -1))} aria-label="Previous month">
               <ChevronLeft className="h-5 w-5" />
             </button>
-            <div className="min-w-[9rem] rounded-lg bg-white px-4 py-2 text-center text-sm font-bold text-slate-900">
+            <div className="min-w-[9rem] rounded-lg border border-slate-200 bg-white px-4 py-2 text-center text-sm font-bold text-slate-900 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:text-white">
               {monthLabel}
             </div>
-            <button type="button" className="rounded-lg bg-white/10 px-2.5 py-2 hover:bg-white/15" onClick={() => setCursor((c) => addMonths(c, 1))} aria-label="Next month">
+            <button type="button" className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700" onClick={() => setCursor((c) => addMonths(c, 1))} aria-label="Next month">
               <ChevronRight className="h-5 w-5" />
             </button>
-            <button type="button" className="rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold hover:bg-white/15" onClick={() => setCursor(startOfMonth(new Date()))}>
+            <button type="button" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700" onClick={() => setCursor(startOfMonth(new Date()))}>
               Today
             </button>
             {isPlatformAdmin && (
               <button
                 type="button"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-400"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-500"
                 onClick={() => setShowLeaveForm(true)}
               >
                 <Plus className="h-3.5 w-3.5" /> Add leave
@@ -302,7 +374,7 @@ export default function CalendarPage() {
           {/* Main month grid */}
           <div className="xl:col-span-8">
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-              <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-900 text-center text-[11px] font-bold uppercase tracking-wide text-white dark:border-slate-700">
+              <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-100 text-center text-[11px] font-bold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                 {WEEKDAYS.map((d) => (
                   <div key={d} className="px-1 py-2.5">
                     {d}
@@ -391,7 +463,7 @@ export default function CalendarPage() {
               {selectedMeetings.length === 0 && selectedLeave.length === 0 ? (
                 <p className="mt-2 text-sm text-slate-500">No meetings or leave on this day.</p>
               ) : (
-                <div className="mt-3 space-y-3">
+                <div className="mt-3 max-h-56 space-y-3 overflow-y-auto pr-1">
                   {selectedMeetings.map((m) => {
                     const c = colorForCommittee(m.committee.code);
                     return (
@@ -440,16 +512,202 @@ export default function CalendarPage() {
                 </div>
               )}
             </div>
+
+            {/* Upcoming events + Leave overview, side by side under the calendar */}
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              {/* Upcoming */}
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                <div className="border-b border-slate-200 bg-slate-100 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  Upcoming events (next 4 weeks)
+                </div>
+                <ul className="max-h-72 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
+                  {upcoming.length === 0 ? (
+                    <li className="px-4 py-3 text-sm text-slate-500">No upcoming meetings.</li>
+                  ) : (
+                    upcoming.map((m) => {
+                      const col = colorForCommittee(m.committee.code);
+                      const d = new Date(m.startsAt);
+                      return (
+                        <li key={m.id}>
+                          <Link
+                            to={`/meetings/${m.id}`}
+                            className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                          >
+                            <span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${col.dot}`} />
+                            <span className="w-14 shrink-0 text-xs font-semibold text-slate-500">
+                              {d.toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate font-medium text-slate-800 dark:text-slate-100">
+                              {m.title}
+                            </span>
+                            <span className="shrink-0 text-xs text-slate-400">{formatTime(m.startsAt)}</span>
+                          </Link>
+                        </li>
+                      );
+                    })
+                  )}
+                </ul>
+              </div>
+
+              {/* Leave overview */}
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-800">
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+                    Leave overview ({monthLabel})
+                  </span>
+                  {isPlatformAdmin && (
+                    <button
+                      type="button"
+                      className="text-[11px] font-semibold text-brand-700 hover:text-brand-900 dark:text-brand-300 dark:hover:text-white"
+                      onClick={() => setShowLeaveForm(true)}
+                    >
+                      + Add
+                    </button>
+                  )}
+                </div>
+                {monthLeave.length === 0 ? (
+                  <p className="px-4 py-3 text-sm text-slate-500">No leave recorded this month.</p>
+                ) : (
+                  <div className="max-h-72 overflow-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-900">
+                        <tr className="border-b border-slate-100 text-[11px] uppercase tracking-wide text-slate-400 dark:border-slate-800">
+                          <th className="px-3 py-2 font-semibold">Name</th>
+                          <th className="px-3 py-2 font-semibold">From</th>
+                          <th className="px-3 py-2 font-semibold">To</th>
+                          <th className="px-3 py-2 font-semibold">Notes</th>
+                          {isPlatformAdmin && <th className="px-3 py-2" />}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monthLeave.map((r) => (
+                          <tr key={r.id} className="border-b border-slate-50 dark:border-slate-800/80">
+                            <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">
+                              {r.user.fullName}
+                            </td>
+                            <td className="px-3 py-2 text-xs text-slate-500">{r.startsOn}</td>
+                            <td className="px-3 py-2 text-xs text-slate-500">{r.endsOn}</td>
+                            <td className="max-w-[8rem] truncate px-3 py-2 text-xs text-slate-500">
+                              {r.note || "—"}
+                            </td>
+                            {isPlatformAdmin && (
+                              <td className="px-2 py-2">
+                                <button
+                                  type="button"
+                                  className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                  title="Remove leave"
+                                  onClick={() => void removeLeave(r.id)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <p className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-400 dark:border-slate-800">
+                  Leave has a start and end date. After the end date, the person is no longer shown as on leave.
+                  {isPlatformAdmin ? "" : " Leave is maintained by platform administrators only."}
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Right panels */}
           <div className="space-y-4 xl:col-span-4">
+            {/* Team availability */}
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <div className="border-b border-slate-200 bg-slate-100 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                Team availability
+              </div>
+              {committeeOptions.length > 0 && (
+                <div className="border-b border-slate-100 px-4 py-2.5 dark:border-slate-800">
+                  {committeeOptions.length > 1 ? (
+                    <select
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                      value={availCommitteeId ?? ""}
+                      onChange={(e) => setAvailCommitteeId(Number(e.target.value))}
+                    >
+                      {committeeOptions.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-xs font-semibold text-slate-500">{committeeOptions[0].name}</p>
+                  )}
+                </div>
+              )}
+              {availLoading ? (
+                <p className="px-4 py-3 text-sm text-slate-500">Loading…</p>
+              ) : committeeOptions.length === 0 ? (
+                <p className="px-4 py-3 text-sm text-slate-500">You're not on any committees yet.</p>
+              ) : availMembers.length === 0 ? (
+                <p className="px-4 py-3 text-sm text-slate-500">No members to show.</p>
+              ) : (
+                <div className="max-h-80 overflow-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-900">
+                      <tr className="border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-500 dark:border-slate-800">
+                        <th className="px-3 py-2 font-semibold">Name</th>
+                        {weekBuckets.map((w) => (
+                          <th key={w.label} className="px-2 py-2 text-center font-semibold">
+                            {w.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {availMembers.map((m) => (
+                        <tr key={m.userId} className="border-b border-slate-50 dark:border-slate-800/80">
+                          <td className="max-w-[8rem] truncate px-3 py-2 font-medium text-slate-800 dark:text-slate-100">
+                            {m.fullName}
+                          </td>
+                          {weekBuckets.map((w) => {
+                            const wStart = ymd(w.start);
+                            const wEnd = ymd(w.end);
+                            const onLeave = leave.some(
+                              (r) => r.userId === m.userId && r.startsOn <= wEnd && r.endsOn >= wStart,
+                            );
+                            return (
+                              <td key={w.label} className="px-2 py-2 text-center">
+                                {onLeave ? (
+                                  <Plane className="mx-auto h-3.5 w-3.5 text-sky-500" aria-label="On leave" />
+                                ) : (
+                                  <span
+                                    className="mx-auto block h-2.5 w-2.5 rounded-full bg-emerald-400"
+                                    aria-label="Available"
+                                  />
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="flex items-center gap-4 border-t border-slate-100 px-4 py-2 text-[11px] text-slate-400 dark:border-slate-800">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" /> Available
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Plane className="h-3 w-3 text-sky-500" /> On leave
+                </span>
+              </div>
+            </div>
+
             {/* Key meetings legend */}
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-              <div className="bg-slate-900 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-white">
+              <div className="border-b border-slate-200 bg-slate-100 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
                 Key meetings & activities ({monthLabel})
               </div>
-              <ul className="divide-y divide-slate-100 p-0 dark:divide-slate-800">
+              <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto p-0 dark:divide-slate-800">
                 {committeeLegend.length === 0 ? (
                   <li className="px-4 py-3 text-sm text-slate-500">No meetings this month.</li>
                 ) : (
@@ -467,122 +725,6 @@ export default function CalendarPage() {
                   })
                 )}
               </ul>
-            </div>
-
-            {/* Upcoming */}
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-              <div className="bg-slate-900 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-white">
-                Upcoming events (next 4 weeks)
-              </div>
-              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-                {upcoming.length === 0 ? (
-                  <li className="px-4 py-3 text-sm text-slate-500">No upcoming meetings.</li>
-                ) : (
-                  upcoming.map((m) => {
-                    const col = colorForCommittee(m.committee.code);
-                    const d = new Date(m.startsAt);
-                    return (
-                      <li key={m.id}>
-                        <Link
-                          to={`/meetings/${m.id}`}
-                          className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                        >
-                          <span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${col.dot}`} />
-                          <span className="w-14 shrink-0 text-xs font-semibold text-slate-500">
-                            {d.toLocaleDateString(undefined, { day: "numeric", month: "short" })}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate font-medium text-slate-800 dark:text-slate-100">
-                            {m.title}
-                          </span>
-                          <span className="shrink-0 text-xs text-slate-400">{formatTime(m.startsAt)}</span>
-                        </Link>
-                      </li>
-                    );
-                  })
-                )}
-              </ul>
-            </div>
-
-            {/* Leave overview */}
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-              <div className="flex items-center justify-between bg-slate-900 px-4 py-2.5">
-                <span className="text-xs font-bold uppercase tracking-wide text-white">
-                  Leave overview ({monthLabel})
-                </span>
-                {isPlatformAdmin && (
-                  <button
-                    type="button"
-                    className="text-[11px] font-semibold text-brand-300 hover:text-white"
-                    onClick={() => setShowLeaveForm(true)}
-                  >
-                    + Add
-                  </button>
-                )}
-              </div>
-              {monthLeave.length === 0 ? (
-                <p className="px-4 py-3 text-sm text-slate-500">No leave recorded this month.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-100 text-[11px] uppercase tracking-wide text-slate-400 dark:border-slate-800">
-                        <th className="px-3 py-2 font-semibold">Name</th>
-                        <th className="px-3 py-2 font-semibold">From</th>
-                        <th className="px-3 py-2 font-semibold">To</th>
-                        <th className="px-3 py-2 font-semibold">Status</th>
-                        <th className="px-3 py-2 font-semibold">Notes</th>
-                        {isPlatformAdmin && <th className="px-3 py-2" />}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {monthLeave.map((r) => {
-                        const st = leaveStatus(r.startsOn, r.endsOn);
-                        return (
-                        <tr key={r.id} className="border-b border-slate-50 dark:border-slate-800/80">
-                          <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">
-                            {r.user.fullName}
-                          </td>
-                          <td className="px-3 py-2 text-xs text-slate-500">{r.startsOn}</td>
-                          <td className="px-3 py-2 text-xs text-slate-500">{r.endsOn}</td>
-                          <td className="px-3 py-2">
-                            <span
-                              className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                st === "active"
-                                  ? "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200"
-                                  : st === "upcoming"
-                                    ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
-                                    : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-                              }`}
-                            >
-                              {st === "active" ? "On leave" : st === "upcoming" ? "Upcoming" : "Ended"}
-                            </span>
-                          </td>
-                          <td className="max-w-[8rem] truncate px-3 py-2 text-xs text-slate-500">
-                            {r.note || "—"}
-                          </td>
-                          {isPlatformAdmin && (
-                            <td className="px-2 py-2">
-                              <button
-                                type="button"
-                                className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                                title="Remove leave"
-                                onClick={() => void removeLeave(r.id)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </td>
-                          )}
-                        </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <p className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-400 dark:border-slate-800">
-                Leave has a start and end date. After the end date, the person is no longer shown as on leave.
-                {isPlatformAdmin ? "" : " Leave is maintained by platform administrators only."}
-              </p>
             </div>
           </div>
         </div>

@@ -12,6 +12,7 @@ import CommitteeWorkspace from "@/pages/CommitteeWorkspace";
 import ActionPoints from "@/pages/ActionPoints";
 import Notifications from "@/pages/Notifications";
 import MeetingDetailPage from "@/pages/MeetingDetail";
+import ReportsPage from "@/pages/Reports";
 import CalendarPage from "@/pages/Calendar";
 import { LoadingLogo } from "@/components/LoadingLogo";
 import { isEntraConfigured } from "@/auth/msalConfig";
@@ -154,6 +155,14 @@ export default function App() {
         element={
           <RequireAuth>
             <MeetingDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <RequireAuth>
+            <ReportsPage />
           </RequireAuth>
         }
       />

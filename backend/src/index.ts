@@ -13,6 +13,6 @@ import "./functions/notifications";
 import "./functions/notificationDispatchTimer";
 import "./functions/reports";
 import "./functions/directory";
+import "./functions/leave";
 import "./functions/dailyReminderTimer";
 import "./functions/audit";
-import "./functions/leave";

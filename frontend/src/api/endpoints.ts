@@ -311,6 +311,19 @@ export const endpoints = {
   dashboard: () => api.get<DashboardSummary>("/reports/dashboard"),
   /** CSV download of the action register (scoped to permitted committees). */
   actionsExport: () => api.download("/reports/actions-export", "action-register.csv"),
+  /** Central / platform admin — monthly action points report (csv | xlsx | pdf) */
+  monthlyActionsReport: (year: number, month: number, format: "csv" | "xlsx" | "pdf") => {
+    const q = new URLSearchParams({
+      year: String(year),
+      month: String(month),
+      format,
+    });
+    const ext = format === "xlsx" ? "xls" : format;
+    return api.download(
+      `/reports/monthly-actions?${q}`,
+      `cam-monthly-actions-${year}-${String(month).padStart(2, "0")}.${ext}`,
+    );
+  },
 
   // Organisational leave (view all; create/delete platform admin only)
   listLeave: (params?: { from?: string; to?: string }) => {

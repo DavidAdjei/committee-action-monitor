@@ -3,6 +3,12 @@ import { requireUser } from "../lib/auth";
 import { loadMemberships, isCentralMember, canViewBankWide, isPlatformAdmin } from "../lib/authorize";
 import { ok, errorResponse, preflight, Errors, corsHeaders } from "../lib/http";
 import { bankWideDashboard, committeeSummary } from "../services/reportService";
+import {
+  buildMonthlyActionReport,
+  reportToCsv,
+  reportToSpreadsheetMl,
+  reportToPdf,
+} from "../services/monthlyActionReport";
 import { prisma } from "../lib/prisma";
 
 async function dashboard(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
@@ -122,4 +128,86 @@ app.http("actionsExport", {
   authLevel: "anonymous",
   route: "reports/actions-export",
   handler: actionsExport,
+});
+
+
+/** Monthly action-points report for Central Committee / platform admins. format=csv|xlsx|pdf */
+async function monthlyActionsReport(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    if (!canViewBankWide(user)) {
+      throw Errors.forbidden(
+        "Monthly action reports are available to platform administrators and Central Committee members only.",
+      );
+    }
+
+    const now = new Date();
+    const year = Number(req.query.get("year") ?? now.getUTCFullYear());
+    const month = Number(req.query.get("month") ?? now.getUTCMonth() + 1);
+    const format = (req.query.get("format") ?? "xlsx").toLowerCase();
+
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      throw Errors.badRequest("Invalid year.");
+    }
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      throw Errors.badRequest("Invalid month (1–12).");
+    }
+    if (!["csv", "xlsx", "pdf"].includes(format)) {
+      throw Errors.badRequest("format must be csv, xlsx, or pdf.");
+    }
+
+    const report = await buildMonthlyActionReport(year, month);
+    const base = `cam-monthly-actions-${year}-${String(month).padStart(2, "0")}`;
+
+    if (format === "csv") {
+      const csv = reportToCsv(report);
+      return {
+        status: 200,
+        body: csv,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${base}.csv"`,
+          "Access-Control-Expose-Headers": "Content-Disposition",
+          ...corsHeaders(),
+        },
+      };
+    }
+
+    if (format === "xlsx") {
+      const xml = reportToSpreadsheetMl(report);
+      return {
+        status: 200,
+        body: xml,
+        headers: {
+          "Content-Type": "application/vnd.ms-excel; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${base}.xls"`,
+          "Access-Control-Expose-Headers": "Content-Disposition",
+          ...corsHeaders(),
+        },
+      };
+    }
+
+    // pdf
+    const pdf = reportToPdf(report);
+    return {
+      status: 200,
+      body: pdf,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${base}.pdf"`,
+        "Access-Control-Expose-Headers": "Content-Disposition",
+        ...corsHeaders(),
+      },
+    };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+app.http("monthlyActionsReport", {
+  methods: ["GET", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "reports/monthly-actions",
+  handler: monthlyActionsReport,
 });

@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { Bell, Building2, CalendarDays, LayoutDashboard, ListChecks, LogOut, ShieldCheck, Moon, Sun, Menu, X, ChevronDown, RefreshCw } from "lucide-react";
+import { Bell, Building2, CalendarDays, LayoutDashboard, ListChecks, BarChart3, LogOut, ShieldCheck, Moon, Sun, Menu, X, ChevronDown, RefreshCw } from "lucide-react";
 import { useAuth } from "@/state/authContext";
 import { useFlash } from "@/state/toastContext";
 import { ApiClientError } from "@/api/client";
@@ -158,6 +158,14 @@ export function Layout({ children }: { children: ReactNode }) {
               to="/dashboard"
               icon={<LayoutDashboard className="h-4 w-4" />}
               label="Dashboard"
+              onClick={closeMobile}
+            />
+          )}
+          {(me.isCentralCommittee || me.isAdmin) && (
+            <NavItem
+              to="/reports"
+              icon={<BarChart3 className="h-4 w-4" />}
+              label="Reports"
               onClick={closeMobile}
             />
           )}
