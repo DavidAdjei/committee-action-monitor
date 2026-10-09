@@ -11,6 +11,7 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [mandate, setMandate] = useState("");
+  const [distributionEmail, setDistributionEmail] = useState("");
   const [meetingFrequency, setMeetingFrequency] = useState("Monthly");
   const [chairperson, setChairperson] = useState<DirectoryUser | null>(null);
   const [secretary, setSecretary] = useState<DirectoryUser | null>(null);
@@ -37,6 +38,7 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
         name,
         code,
         mandate: mandate || undefined,
+        distributionEmail: distributionEmail.trim() || undefined,
         meetingFrequency,
         chairpersonId: chairperson.id,
         secretaryId: secretary.id,
@@ -94,6 +96,17 @@ export function AddCommitteeModal({ onClose, onCreated }: { onClose: () => void;
             <option>Monthly</option>
             <option>Quarterly</option>
           </select>
+        </label>
+
+        <label className="field-label">
+          Distribution email (optional)
+          <input
+            className="field-input"
+            type="email"
+            placeholder="e.g. ALCO@myumbbank.com"
+            value={distributionEmail}
+            onChange={(e) => setDistributionEmail(e.target.value)}
+          />
         </label>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

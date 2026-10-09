@@ -62,7 +62,10 @@ export const endpoints = {
     secretaryId: number;
     centralRepId: number;
     memberIds: number[];
+    distributionEmail?: string | null;
   }) => api.post(`/committees`, data),
+  setCommitteeDistributionEmail: (committeeId: number, distributionEmail: string | null) =>
+    api.patch(`/committees/${committeeId}/distribution-email`, { distributionEmail }),
   addCommitteeMember: (committeeId: number, data: { userId: number; role?: string }) =>
     api.post(`/committees/${committeeId}/members`, data),
   removeCommitteeMember: (committeeId: number, userId: number) =>
@@ -152,14 +155,29 @@ export const endpoints = {
     return api.postForm<{ id: number; filename: string }>(`/meetings/${meetingId}/papers`, form);
   },
   listMeetingPapers: (meetingId: number) => api.get(`/meetings/${meetingId}/papers`),
-  notifyMeetingPapers: (meetingId: number) => api.post(`/meetings/${meetingId}/papers/notify`, {}),
+  downloadMeetingPaper: (meetingId: number, paperId: number, filename?: string) =>
+    api.download(
+      `/meetings/${meetingId}/papers/${paperId}/download`,
+      filename || `paper-${paperId}`,
+    ),
+  notifyMeetingPapers: (meetingId: number) =>
+    api.post<{ sent: number; failed: number; recipientCount: number }>(
+      `/meetings/${meetingId}/papers/notify`,
+      {},
+    ),
   listMeetingMinutes: (meetingId: number) =>
     api.get<MeetingMinutes[]>(`/meetings/${meetingId}/minutes`),
-  uploadMinutesDocument: (meetingId: number, file: File, status: "DRAFT" | "FINAL", discussion?: string) => {
+  uploadMinutesDocument: (
+    meetingId: number,
+    file: File,
+    status: "DRAFT" | "FINAL",
+    options?: { discussion?: string; notifyMinutesIssued?: boolean },
+  ) => {
     const form = new FormData();
     form.append("file", file);
     form.append("status", status);
-    if (discussion) form.append("discussion", discussion);
+    if (options?.discussion) form.append("discussion", options.discussion);
+    form.append("notifyMinutesIssued", options?.notifyMinutesIssued ? "true" : "false");
     return api.postForm<{
       id: number;
       status: string;
@@ -211,6 +229,7 @@ export const endpoints = {
     page?: number;
     pageSize?: number;
     committeeId?: number;
+    scope?: "mine" | "all";
   }) => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
@@ -218,6 +237,7 @@ export const endpoints = {
     if (params?.page) qs.set("page", String(params.page));
     if (params?.pageSize) qs.set("pageSize", String(params.pageSize));
     if (params?.committeeId) qs.set("committeeId", String(params.committeeId));
+    if (params?.scope) qs.set("scope", params.scope);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return api.get<{ total: number; page: number; pageSize: number; items: ActionListItem[] }>(
       `/actions${suffix}`,
@@ -310,8 +330,65 @@ export const endpoints = {
 
   dashboard: () => api.get<DashboardSummary>("/reports/dashboard"),
   /** CSV download of the action register (scoped to permitted committees). */
+  health: () => api.get<{ status: string }>("/health"),
+  healthMetrics: () =>
+    api.get<{
+      startedAt: string;
+      uptimeSeconds: number;
+      mail: {
+        batchesSent: number;
+        batchesFailed: number;
+        notificationsMarkedSent: number;
+        notificationsMarkedFailed: number;
+      };
+      teams: {
+        provisionAttempts: number;
+        provisionSuccess: number;
+        provisionFailed: number;
+      };
+      outbox: { emailFailed: number; emailPending: number; anyFailed: number };
+      notes: string[];
+    }>("/health/metrics"),
+  notificationOutbox: (limit = 50) =>
+    api.get<
+      {
+        id: number;
+        channel: string;
+        notificationType: string;
+        deliveryStatus: string;
+        errorMessage: string | null;
+        scheduledFor: string;
+        sentAt: string | null;
+        recipient: { id: number; fullName: string; email: string };
+        actionPoint: { id: number; referenceNo: string; title: string } | null;
+      }[]
+    >(`/notifications/outbox?limit=${limit}`),
+  retryNotificationOutbox: () =>
+    api.post<{ reset: number; sent: number; failed: number }>("/notifications/outbox/retry", {}),
   actionsExport: () => api.download("/reports/actions-export", "action-register.csv"),
   /** Central / platform admin — monthly action points report (csv | xlsx | pdf) */
+  monthlyActionsPreview: (year: number, month: number) =>
+    api.get<{
+      year: number;
+      month: number;
+      monthLabel: string;
+      total: number;
+      completed: number;
+      open: number;
+      inProgress: number;
+      overdue: number;
+      completionRate: number;
+      avgProgress: number;
+      byCommittee: {
+        committeeId: number;
+        name: string;
+        code: string;
+        total: number;
+        completed: number;
+        completionRate: number;
+      }[];
+      byStatus: { status: string; count: number }[];
+    }>(`/reports/monthly-actions?year=${year}&month=${month}&format=json`),
   monthlyActionsReport: (year: number, month: number, format: "csv" | "xlsx" | "pdf") => {
     const q = new URLSearchParams({
       year: String(year),

@@ -8,6 +8,7 @@
  */
 
 import { prisma } from "../lib/prisma";
+import { recordTeamsAttempt, recordTeamsFailed, recordTeamsSuccess } from "../lib/opsMetrics";
 import { Errors } from "../lib/http";
 import {
   graphEnv,
@@ -491,6 +492,8 @@ export async function tryProvisionTeamsForMeeting(params: {
     return { attempted: false, error: null };
   }
 
+  recordTeamsAttempt();
+
   teamsLog("info", "PROVISION START", {
     meetingId: params.meetingId,
     mode: params.authMode ?? "delegated",
@@ -527,6 +530,7 @@ export async function tryProvisionTeamsForMeeting(params: {
           error: lastError.slice(0, 400),
         });
         if (!allowFallback || !isGraphAppConfigured()) {
+          recordTeamsFailed();
           return { attempted: true, error: lastError.slice(0, 500) };
         }
         teamsLog("info", "PROVISION trying APPLICATION fallback", { meetingId: params.meetingId });
@@ -546,6 +550,7 @@ export async function tryProvisionTeamsForMeeting(params: {
             meetingId: params.meetingId,
             error: appMsg.slice(0, 400),
           });
+          recordTeamsFailed();
           return { attempted: true, error: lastError.slice(0, 500) };
         }
       }
@@ -554,6 +559,7 @@ export async function tryProvisionTeamsForMeeting(params: {
         lastError =
           "Teams application mode requires ENTRA_GRAPH_TENANT_ID, CLIENT_ID, and CLIENT_SECRET on the API.";
         teamsLog("error", "PROVISION aborted", { meetingId: params.meetingId, error: lastError });
+        recordTeamsFailed();
         return { attempted: true, error: lastError };
       }
       result = await createTeamsOnlineMeetingApplication({
@@ -582,6 +588,7 @@ export async function tryProvisionTeamsForMeeting(params: {
       joinUrlPrefix: result.joinUrl.slice(0, 60),
     });
 
+    recordTeamsSuccess();
     return {
       teamsEventId: result.id,
       teamsJoinUrl: result.joinUrl,
@@ -592,6 +599,7 @@ export async function tryProvisionTeamsForMeeting(params: {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     teamsLog("error", "PROVISION FAILED", { meetingId: params.meetingId, error: msg.slice(0, 400) });
+    recordTeamsFailed();
     return { attempted: true, error: msg.slice(0, 500) };
   }
 }

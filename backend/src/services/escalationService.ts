@@ -36,10 +36,15 @@ export async function runDailyReminderAndEscalation(): Promise<{
 
   let remindersQueued = 0;
   for (const action of dueForReminder) {
+    const stakeholderIds = action.stakeholders.map((s) => s.userId);
+    const ownerIds = action.stakeholders
+      .filter((s) => s.stakeholderType === "ACTION_OWNER")
+      .map((s) => s.userId);
     const result = await prisma.notification.createMany({
       data: buildActionNotifications({
         actionPointId: action.id,
-        recipientIds: action.stakeholders.map((s) => s.userId),
+        recipientIds: stakeholderIds.length ? stakeholderIds : [action.ownerId],
+        emailRecipientIds: ownerIds.length ? ownerIds : [action.ownerId],
         notificationType: "DAILY_REMINDER",
         scheduledFor: today,
       }),
@@ -63,10 +68,15 @@ export async function runDailyReminderAndEscalation(): Promise<{
         where: { id: action.id, version: action.version },
         data: { status: "OVERDUE", version: { increment: 1 } },
       });
+      const stakeholderIds = action.stakeholders.map((s) => s.userId);
+      const ownerIds = action.stakeholders
+        .filter((s) => s.stakeholderType === "ACTION_OWNER")
+        .map((s) => s.userId);
       await tx.notification.createMany({
         data: buildActionNotifications({
           actionPointId: action.id,
-          recipientIds: action.stakeholders.map((s) => s.userId),
+          recipientIds: stakeholderIds.length ? stakeholderIds : [action.ownerId],
+          emailRecipientIds: ownerIds.length ? ownerIds : [action.ownerId],
           notificationType: "OVERDUE_ESCALATION",
           scheduledFor: today,
         }),

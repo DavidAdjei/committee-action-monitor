@@ -65,43 +65,77 @@ export function CreateMeetingModal({
         await endpoints.uploadMeetingPaper(meetingId, file);
       }
 
+      let mailStatus: "sent" | "failed" | "skipped" | "none" = notifyPapers ? "none" : "skipped";
+      let mailDetail = "";
       if (notifyPapers) {
         try {
-          await endpoints.notifyMeetingPapers(meetingId);
-        } catch {
-          // Meeting is saved; email is best-effort
+          const mail = (await endpoints.notifyMeetingPapers(meetingId)) as {
+            sent?: number;
+            failed?: number;
+            recipientCount?: number;
+          };
+          const recipients = mail.recipientCount ?? 0;
+          if ((mail.sent ?? 0) > 0) {
+            mailStatus = "sent";
+            mailDetail =
+              recipients > 0
+                ? `Invitation emailed to ${recipients} recipient${recipients === 1 ? "" : "s"} (one message).`
+                : "Invitation email sent.";
+          } else if (recipients === 0) {
+            mailStatus = "failed";
+            mailDetail = "No email recipients found for this committee.";
+          } else {
+            mailStatus = "failed";
+            mailDetail = `Invitation email failed (${recipients} intended recipient${recipients === 1 ? "" : "s"}). Check mail configuration.`;
+          }
+        } catch (mailErr: unknown) {
+          mailStatus = "failed";
+          mailDetail =
+            mailErr instanceof ApiClientError
+              ? mailErr.message
+              : "Invitation email could not be sent.";
         }
       }
 
+      const parts: string[] = ["Meeting saved"];
+      if (papers.length) parts.push(`${papers.length} paper${papers.length === 1 ? "" : "s"} uploaded`);
 
       if (teams) {
         if (provisioned) {
-          flash(
-            papers.length
-              ? `Meeting created with Teams link (${teamsAuthMode ?? "ok"}); papers uploaded`
-              : `Meeting created with Microsoft Teams join link (${teamsAuthMode ?? "ok"})`,
-          );
+          parts.push(`Teams link created${teamsAuthMode ? ` (${teamsAuthMode})` : ""}`);
         } else {
           const detail = teamsError
-            ? teamsError.slice(0, 280)
+            ? teamsError.slice(0, 180)
             : teamsAttempted
-              ? "Teams provisioning ran but returned no join URL."
-              : "Teams provisioning did not run (check teamsRequested / API logs).";
-          flash(
-            `Meeting saved in CAM, but Teams was not created. ${detail}`,
-            "error",
-          );
+              ? "Teams ran but returned no join URL"
+              : "Teams was not provisioned";
+          parts.push(`Teams failed: ${detail}`);
         }
       } else {
-        flash(papers.length ? "Meeting created; papers uploaded" : "Meeting created successfully");
+        parts.push("Teams not requested");
       }
+
+      if (mailStatus === "sent") parts.push(mailDetail);
+      else if (mailStatus === "skipped") parts.push("Invitation email not requested");
+      else if (mailStatus === "failed") parts.push(mailDetail);
+
+      const isError = (teams && !provisioned) || mailStatus === "failed";
+      flash(parts.join(" · "), isError ? "error" : "success");
       onCreated();
       onClose();
     } catch (err: unknown) {
       if (err instanceof ApiClientError && err.isForbidden) {
-        setError("You are not authorized to create meetings in this committee.");
+        setError(
+          err.message && err.message !== "Forbidden"
+            ? err.message
+            : "Only the committee Chairperson or Secretary may create meetings.",
+        );
       } else {
-        setError((err as Error)?.message ?? "Could not save the meeting.");
+        setError(
+          err instanceof ApiClientError
+            ? err.message
+            : (err as Error)?.message ?? "Could not save the meeting.",
+        );
       }
     } finally {
       setSubmitting(false);
@@ -245,7 +279,10 @@ export function CreateMeetingModal({
               checked={notifyPapers}
               onChange={(e) => setNotifyPapers(e.target.checked)}
             />
-            Email invitation to committee stakeholders (chair, secretary, members) after save — includes Teams link and any papers
+            <span className="block font-medium text-slate-800 dark:text-slate-100">Send meeting invitation email</span>
+            <span className="mt-0.5 block text-xs text-slate-500">
+              To: committee distribution list if set, otherwise all members. Includes Teams link and any papers attached.
+            </span>
           </label>
         </div>
 

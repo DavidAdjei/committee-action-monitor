@@ -25,6 +25,22 @@ async function listCommittees(req: HttpRequest, _ctx: InvocationContext): Promis
 
     const summaries = await committeeSummary(committees.map((c) => c.id));
 
+    const now = new Date();
+    const upcoming = await prisma.meeting.findMany({
+      where: {
+        committeeId: { in: committees.map((c) => c.id) },
+        startsAt: { gte: now },
+      },
+      orderBy: { startsAt: "asc" },
+      select: { id: true, committeeId: true, title: true, startsAt: true },
+    });
+    const nextByCommittee = new Map<number, { id: number; title: string; startsAt: Date }>();
+    for (const m of upcoming) {
+      if (!nextByCommittee.has(m.committeeId)) {
+        nextByCommittee.set(m.committeeId, { id: m.id, title: m.title, startsAt: m.startsAt });
+      }
+    }
+
     const roleRank = (role: string | null | undefined): number => {
       if (role === "CHAIRPERSON") return 0;
       if (role === "SECRETARY") return 1;
@@ -42,6 +58,14 @@ async function listCommittees(req: HttpRequest, _ctx: InvocationContext): Promis
           code: c.code,
           mandate: c.mandate,
           meetingFrequency: c.meetingFrequency,
+          distributionEmail: c.distributionEmail,
+          nextMeeting: nextByCommittee.has(c.id)
+            ? {
+                id: nextByCommittee.get(c.id)!.id,
+                title: nextByCommittee.get(c.id)!.title,
+                startsAt: nextByCommittee.get(c.id)!.startsAt,
+              }
+            : null,
           chairperson: { id: c.chairperson.id, fullName: c.chairperson.fullName },
           secretary: { id: c.secretary.id, fullName: c.secretary.fullName },
           centralRep: c.centralRep
@@ -84,6 +108,7 @@ async function createCommitteeHandler(req: HttpRequest, _ctx: InvocationContext)
       secretaryId?: number;
       centralRepId?: number;
       memberIds?: number[];
+      distributionEmail?: string | null;
     };
 
     if (!body.name || !body.code || !body.chairpersonId || !body.secretaryId) {
@@ -111,6 +136,7 @@ async function createCommitteeHandler(req: HttpRequest, _ctx: InvocationContext)
       secretaryId: body.secretaryId,
       centralRepId: body.centralRepId ?? null,
       memberIds: body.memberIds ?? [],
+      distributionEmail: body.distributionEmail ?? null,
       createdById: user.id,
     });
 

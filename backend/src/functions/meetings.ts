@@ -2,7 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/fu
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
 import { requireViewCommittee, requireCommitteeOfficer, isCommitteeOfficer } from "../lib/authorize";
-import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
+import { ok, errorResponse, preflight, Errors, ApiError, corsHeaders } from "../lib/http";
 import { recordDenied } from "../services/auditService";
 import {
   createMeeting,
@@ -12,7 +12,7 @@ import {
   recordMeetingOutcome,
 } from "../services/meetingService";
 import { tryProvisionTeamsForMeeting } from "../services/teamsMeetingService";
-import { addMeetingPaper, listMeetingPapers, emailMeetingPapersToCommittee } from "../services/meetingPaperService";
+import { addMeetingPaper, listMeetingPapers, emailMeetingPapersToCommittee, downloadMeetingPaper } from "../services/meetingPaperService";
 import { EvidenceValidationError } from "../services/storageService";
 
 async function listMeetings(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
@@ -578,4 +578,45 @@ app.http("meetingPapersNotify", {
   authLevel: "anonymous",
   route: "meetings/{meetingId}/papers/notify",
   handler: meetingPapersNotifyHandler,
+});
+
+async function downloadMeetingPaperHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const meetingId = Number(req.params.meetingId);
+    const paperId = Number(req.params.paperId);
+    if (!Number.isInteger(meetingId) || !Number.isInteger(paperId)) {
+      throw Errors.badRequest("Invalid meeting or paper id.");
+    }
+    const meeting = await prisma.meeting.findUnique({ where: { id: meetingId } });
+    if (!meeting) throw Errors.notFound("Meeting");
+    await requireViewCommittee(user, meeting.committeeId);
+
+    const paper = await prisma.meetingPaper.findFirst({
+      where: { id: paperId, meetingId },
+    });
+    if (!paper) throw Errors.notFound("Meeting paper");
+
+    const file = await downloadMeetingPaper(paperId);
+    return {
+      status: 200,
+      body: file.buffer,
+      headers: {
+        "Content-Type": file.contentType,
+        "Content-Disposition": `attachment; filename="${file.filename.replace(/"/g, "")}"`,
+        "Access-Control-Expose-Headers": "Content-Disposition",
+        ...corsHeaders(),
+      },
+    };
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+app.http("meetingPaperDownload", {
+  methods: ["GET", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "meetings/{meetingId}/papers/{paperId}/download",
+  handler: downloadMeetingPaperHandler,
 });

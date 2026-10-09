@@ -136,6 +136,8 @@ async function uploadMinutesDocumentHandler(
     const file = form.get("file");
     const statusRaw = String(form.get("status") ?? "DRAFT").toUpperCase();
     const discussion = form.get("discussion");
+    const notifyRaw = String(form.get("notifyMinutesIssued") ?? form.get("notify") ?? "false").toLowerCase();
+    const notifyMinutesIssued = notifyRaw === "true" || notifyRaw === "1" || notifyRaw === "yes";
     if (!file || typeof file === "string") throw Errors.badRequest("A file field is required.");
     if (statusRaw !== "DRAFT" && statusRaw !== "FINAL") {
       throw Errors.badRequest("status must be DRAFT or FINAL.");
@@ -150,6 +152,7 @@ async function uploadMinutesDocumentHandler(
       mediaType: file.type || "application/octet-stream",
       buffer,
       discussion: typeof discussion === "string" ? discussion : undefined,
+      notifyMinutesIssued,
     });
 
     return ok(

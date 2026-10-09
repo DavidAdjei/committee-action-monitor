@@ -40,6 +40,8 @@ export interface CommitteeSummary {
   code: string;
   mandate: string | null;
   meetingFrequency: string | null;
+  distributionEmail?: string | null;
+  nextMeeting?: { id: number; title: string; startsAt: string } | null;
   chairperson: { id: number; fullName: string };
   secretary: { id: number; fullName: string };
   centralRep?: { id: number; fullName: string } | null;
@@ -72,6 +74,7 @@ export interface Meeting {
 }
 
 export interface CommitteeDetail {
+  distributionEmail?: string | null;
   id: number;
   name: string;
   code: string;

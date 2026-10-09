@@ -10,6 +10,8 @@
  * messages are logged and marked sent (no real delivery).
  */
 import { prisma } from "../lib/prisma";
+import { groupEmailRows } from "../lib/notificationGrouping";
+import { recordMailBatchFailed, recordMailBatchSent } from "../lib/opsMetrics";
 import { graphEnv, graphFetch, isGraphAppConfigured } from "../lib/graphClient";
 import type { OutboundNotification } from "./notificationService";
 
@@ -100,7 +102,11 @@ export async function buildEmailContent(n: {
 
   const portal = appBaseUrl();
   const actionLink = action ? `${portal}/actions/${action.id}` : portal;
-  const subject = subjectFor(n.notificationType, action?.referenceNo);
+  // Committee-create notifications reuse CREATED with no actionPointId
+  const subject =
+    n.notificationType === "CREATED" && !action
+      ? "[CAM] You were added to a committee"
+      : subjectFor(n.notificationType, action?.referenceNo);
 
   const lines: string[] = [];
   lines.push(`Hello ${recipient.fullName},`);
@@ -108,7 +114,13 @@ export async function buildEmailContent(n: {
 
   switch (n.notificationType) {
     case "CREATED":
-      lines.push("A new action point has been assigned or linked to you.");
+      if (!action) {
+        lines.push(
+          "You have been added as a member of a new committee in Committee Action Monitor. Sign in to view meetings and action points for that committee.",
+        );
+      } else {
+        lines.push("A new action point has been assigned or linked to you.");
+      }
       break;
     case "DAILY_REMINDER":
       lines.push("This is a reminder about an outstanding action point.");
@@ -139,7 +151,9 @@ export async function buildEmailContent(n: {
       );
       break;
     case "MINUTES_ISSUED":
-      lines.push("Meeting minutes have been issued.");
+      lines.push(
+        "Meeting minutes (draft or final) have been uploaded. Open CAM to download the document.",
+      );
       break;
     default:
       lines.push(`You have a new notification (${n.notificationType}).`);
@@ -285,9 +299,12 @@ export async function sendGraphMail(params: {
   }
 }
 
+/** Code used for the bank-wide Central Committee record (meetings + distribution DL). */
+export const CENTRAL_COMMITTEE_CODE = "CENTRAL";
+
 /**
- * When true, Central Committee members are CC'd on batched notification emails.
- * Default OFF so testing does not flood central members — set in local.settings / env:
+ * When true, individual Central Committee *people* are also CC'd (in addition to the
+ * central distribution mailbox when set). Default OFF for testing.
  *   EMAIL_CC_CENTRAL_COMMITTEE=true
  */
 export function isCentralCommitteeCcEnabled(): boolean {
@@ -297,24 +314,78 @@ export function isCentralCommitteeCcEnabled(): boolean {
   return v === "true" || v === "1" || v === "yes";
 }
 
-async function loadCentralCommitteeCcList(
+const OWNER_FOCUSED_TYPES = new Set(["CREATED", "DAILY_REMINDER", "OVERDUE_ESCALATION"]);
+
+function pushCc(
+  out: { email: string; name?: string }[],
+  exclude: Set<string>,
+  email: string | null | undefined,
+  name?: string | null,
+) {
+  if (!email || !email.includes("@")) return;
+  const key = email.trim().toLowerCase();
+  if (exclude.has(key)) return;
+  exclude.add(key);
+  out.push({ email: email.trim(), name: name || email.trim() });
+}
+
+/**
+ * CC list for action emails: committee secretary + Central Committee distribution
+ * mailbox (and optionally each central member when EMAIL_CC_CENTRAL_COMMITTEE=true).
+ */
+async function loadActionEmailCcList(
+  actionPointId: number | null,
   excludeEmails: Set<string>,
+  notificationType: string,
 ): Promise<{ email: string; name?: string }[]> {
-  if (!isCentralCommitteeCcEnabled()) return [];
-  const users = await prisma.user.findMany({
-    where: { active: true, isCentralCommittee: true },
-    select: { email: true, fullName: true },
-  });
   const out: { email: string; name?: string }[] = [];
-  for (const u of users) {
-    if (!u.email || !u.email.includes("@")) continue;
-    const key = u.email.trim().toLowerCase();
-    if (excludeEmails.has(key)) continue;
-    excludeEmails.add(key);
-    out.push({ email: u.email.trim(), name: u.fullName });
+  if (!OWNER_FOCUSED_TYPES.has(notificationType)) {
+    // Other types: optional individual central CC only
+    if (isCentralCommitteeCcEnabled()) {
+      const users = await prisma.user.findMany({
+        where: { active: true, isCentralCommittee: true },
+        select: { email: true, fullName: true },
+      });
+      for (const u of users) pushCc(out, excludeEmails, u.email, u.fullName);
+    }
+    return out;
+  }
+
+  if (actionPointId) {
+    const action = await prisma.actionPoint.findUnique({
+      where: { id: actionPointId },
+      select: {
+        committee: {
+          select: {
+            secretary: { select: { email: true, fullName: true } },
+          },
+        },
+      },
+    });
+    pushCc(
+      out,
+      excludeEmails,
+      action?.committee.secretary?.email,
+      action?.committee.secretary?.fullName,
+    );
+  }
+
+  const central = await prisma.committee.findUnique({
+    where: { code: CENTRAL_COMMITTEE_CODE },
+    select: { distributionEmail: true, name: true },
+  });
+  pushCc(out, excludeEmails, central?.distributionEmail, central?.name ?? "Central Committee");
+
+  if (isCentralCommitteeCcEnabled()) {
+    const users = await prisma.user.findMany({
+      where: { active: true, isCentralCommittee: true },
+      select: { email: true, fullName: true },
+    });
+    for (const u of users) pushCc(out, excludeEmails, u.email, u.fullName);
   }
   return out;
 }
+
 
 /**
  * Deliver a single outbox row (legacy path). Prefer batched processPendingEmailQueue.
@@ -348,7 +419,7 @@ export async function deliverNotification(n: {
   }
 
   const exclude = new Set([content.toEmail.toLowerCase()]);
-  const cc = await loadCentralCommitteeCcList(exclude);
+  const cc = await loadActionEmailCcList(n.actionPointId, exclude, n.notificationType);
 
   await sendGraphMail({
     toEmail: content.toEmail,
@@ -358,6 +429,121 @@ export async function deliverNotification(n: {
     html: content.html,
     text: content.text,
   });
+}
+
+
+/** Digest email when one owner is assigned several new actions (same meeting). */
+async function buildCreatedDigestContent(params: {
+  recipientId: number;
+  actionPointIds: number[];
+}): Promise<{
+  toEmail: string;
+  toName: string;
+  subject: string;
+  html: string;
+  text: string;
+  primaryActionId: number | null;
+}> {
+  const recipient = await prisma.user.findUnique({ where: { id: params.recipientId } });
+  if (!recipient?.email) {
+    throw new Error(`Recipient ${params.recipientId} has no email address.`);
+  }
+
+  const actions = await prisma.actionPoint.findMany({
+    where: { id: { in: params.actionPointIds } },
+    include: {
+      committee: { select: { name: true, code: true } },
+      meeting: { select: { id: true, title: true, reference: true } },
+    },
+    orderBy: { referenceNo: "asc" },
+  });
+  if (actions.length === 0) {
+    throw new Error("No action points found for digest.");
+  }
+
+  const portal = appBaseUrl();
+  const meeting = actions[0].meeting;
+  const committee = actions[0].committee;
+  const count = actions.length;
+  const subject =
+    count === 1
+      ? `[CAM] New action point assigned: ${actions[0].referenceNo}`
+      : `[CAM] ${count} new action points assigned` +
+        (meeting ? ` — ${meeting.reference}` : "");
+
+  const lines: string[] = [];
+  lines.push(`Hello ${recipient.fullName},`);
+  lines.push("");
+  if (count === 1) {
+    lines.push("A new action point has been assigned to you.");
+  } else {
+    lines.push(
+      `${count} new action points have been assigned to you` +
+        (meeting ? ` from meeting ${meeting.reference} (${meeting.title})` : "") +
+        ".",
+    );
+  }
+  lines.push("");
+  lines.push(`Committee: ${committee.name} (${committee.code})`);
+  lines.push("");
+  for (const a of actions) {
+    lines.push(`• ${a.referenceNo} — ${a.title}`);
+    lines.push(`  Deadline: ${a.deadline.toISOString().slice(0, 10)} · Priority: ${a.priority}`);
+    lines.push(`  Open: ${portal}/actions/${a.id}`);
+    lines.push("");
+  }
+  lines.push("— Committee Action Monitor");
+  lines.push("This is an automated message. Please do not reply to this email.");
+
+  const text = lines.join("\n");
+  const listHtml = actions
+    .map(
+      (a) => `
+    <tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0"><b>${escapeHtml(a.referenceNo)}</b></td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0">${escapeHtml(a.title)}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0">${a.deadline.toISOString().slice(0, 10)}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0"><a href="${portal}/actions/${a.id}">Open</a></td>
+    </tr>`,
+    )
+    .join("");
+
+  const html = `
+<!DOCTYPE html>
+<html><body style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a;line-height:1.5">
+  <p>Hello ${escapeHtml(recipient.fullName)},</p>
+  <p>${
+    count === 1
+      ? "A new action point has been assigned to you."
+      : escapeHtml(
+          `${count} new action points have been assigned to you` +
+            (meeting ? ` from meeting ${meeting.reference}` : "") +
+            ".",
+        )
+  }</p>
+  <p style="color:#64748b">Committee: <b>${escapeHtml(committee.name)}</b> (${escapeHtml(committee.code)})</p>
+  <table style="border-collapse:collapse;width:100%;margin:16px 0;font-size:13px">
+    <thead>
+      <tr style="background:#f8fafc;text-align:left">
+        <th style="padding:8px 12px">Reference</th>
+        <th style="padding:8px 12px">Title</th>
+        <th style="padding:8px 12px">Deadline</th>
+        <th style="padding:8px 12px"></th>
+      </tr>
+    </thead>
+    <tbody>${listHtml}</tbody>
+  </table>
+  <p style="color:#94a3b8;font-size:12px;margin-top:24px">Committee Action Monitor · Automated notification</p>
+</body></html>`.trim();
+
+  return {
+    toEmail: recipient.email,
+    toName: recipient.fullName,
+    subject,
+    html,
+    text,
+    primaryActionId: actions[0]?.id ?? null,
+  };
 }
 
 type PendingRow = {
@@ -370,10 +556,11 @@ type PendingRow = {
 
 /**
  * Process pending outbox rows.
- * EMAIL rows with the same type + action are sent as ONE message to all recipients (To:),
- * with optional CC to Central Committee when EMAIL_CC_CENTRAL_COMMITTEE=true.
+ * - CREATED: digest by recipient + meeting (many new actions → one email to that owner)
+ * - Other types: same type + action → one message to all recipients on To:
+ * CC: secretary + central distribution list for owner-focused types.
  */
-export async function processPendingEmailQueue(limit = 100): Promise<{
+export async function processPendingEmailQueue(limit = 500): Promise<{
   sent: number;
   failed: number;
   skipped: number;
@@ -407,61 +594,92 @@ export async function processPendingEmailQueue(limit = 100): Promise<{
 
   const emailRows = pending.filter((n) => n.channel === "EMAIL") as PendingRow[];
 
-  // Group by event so stakeholders share one email
-  const groups = new Map<string, PendingRow[]>();
-  for (const n of emailRows) {
-    const key = `${n.notificationType}::${n.actionPointId ?? "none"}`;
-    const list = groups.get(key) ?? [];
-    list.push(n);
-    groups.set(key, list);
+  // Resolve meetingId for CREATED rows so we can digest per owner + meeting
+  const createdActionIds = [
+    ...new Set(
+      emailRows
+        .filter((n) => n.notificationType === "CREATED" && n.actionPointId != null)
+        .map((n) => n.actionPointId as number),
+    ),
+  ];
+  const actionMeeting = new Map<number, number | null>();
+  if (createdActionIds.length > 0) {
+    const acts = await prisma.actionPoint.findMany({
+      where: { id: { in: createdActionIds } },
+      select: { id: true, meetingId: true },
+    });
+    for (const a of acts) actionMeeting.set(a.id, a.meetingId);
   }
 
-  for (const [, group] of groups) {
+  const groups = groupEmailRows(emailRows, actionMeeting);
+
+  for (const [groupKey, group] of groups) {
     try {
-      // Build body from first row (same action / type for whole group)
       const seed = group[0];
-      const content = await buildEmailContent(seed);
+      const isCreatedDigest =
+        seed.notificationType === "CREATED" && groupKey.startsWith("CREATED::recipient:");
 
-      const users = await prisma.user.findMany({
-        where: { id: { in: group.map((g) => g.recipientId) } },
-        select: { id: true, email: true, fullName: true },
-      });
-      const byId = new Map(users.map((u) => [u.id, u]));
+      let subject: string;
+      let html: string;
+      let text: string;
+      let toRecipients: { email: string; name?: string }[];
+      let primaryActionId: number | null = seed.actionPointId;
 
-      const toMap = new Map<string, { email: string; name?: string }>();
-      for (const g of group) {
-        const u = byId.get(g.recipientId);
-        if (!u?.email || !u.email.includes("@")) continue;
-        const key = u.email.trim().toLowerCase();
-        if (!toMap.has(key)) {
-          toMap.set(key, { email: u.email.trim(), name: u.fullName });
+      if (isCreatedDigest) {
+        // One owner, one or more actions (same meeting)
+        const actionIds = [
+          ...new Set(group.map((g) => g.actionPointId).filter((id): id is number => id != null)),
+        ];
+        const digest = await buildCreatedDigestContent({
+          recipientId: seed.recipientId,
+          actionPointIds: actionIds,
+        });
+        subject = digest.subject;
+        html = digest.html;
+        text = digest.text;
+        toRecipients = [{ email: digest.toEmail, name: digest.toName }];
+        primaryActionId = digest.primaryActionId;
+      } else {
+        const content = await buildEmailContent(seed);
+        const users = await prisma.user.findMany({
+          where: { id: { in: group.map((g) => g.recipientId) } },
+          select: { id: true, email: true, fullName: true },
+        });
+        const byId = new Map(users.map((u) => [u.id, u]));
+        const toMap = new Map<string, { email: string; name?: string }>();
+        for (const g of group) {
+          const u = byId.get(g.recipientId);
+          if (!u?.email || !u.email.includes("@")) continue;
+          const key = u.email.trim().toLowerCase();
+          if (!toMap.has(key)) {
+            toMap.set(key, { email: u.email.trim(), name: u.fullName });
+          }
         }
-      }
-      const toRecipients = [...toMap.values()];
-      if (toRecipients.length === 0) {
-        throw new Error("No valid email addresses in notification group.");
-      }
-
-      // Multi-recipient greeting (avoid single-person "Hello Alice" when To has many)
-      let html = content.html;
-      let text = content.text;
-      if (toRecipients.length > 1) {
-        html = html.replace(
-          /Hello\s+[^,<]+,/,
-          "Hello,",
-        );
-        text = text.replace(/^Hello [^\n]+,/m, "Hello,");
+        toRecipients = [...toMap.values()];
+        if (toRecipients.length === 0) {
+          throw new Error("No valid email addresses in notification group.");
+        }
+        subject = content.subject;
+        html = content.html;
+        text = content.text;
+        if (toRecipients.length > 1) {
+          html = html.replace(/Hello\s+[^,<]+,/, "Hello,");
+          text = text.replace(/^Hello [^\n]+,/m, "Hello,");
+        }
       }
 
       const exclude = new Set(toRecipients.map((r) => r.email.toLowerCase()));
-      const cc = await loadCentralCommitteeCcList(exclude);
+      const cc = await loadActionEmailCcList(
+        primaryActionId,
+        exclude,
+        seed.notificationType,
+      );
 
       if (!isMailSendConfigured()) {
         if (process.env.MAIL_DEV_LOG === "true" || process.env.DEV_AUTH_ENABLED === "true") {
           console.info(
-            `[mail:dev] BATCH To=${toRecipients.map((r) => r.email).join(", ")} ` +
-              `Cc=${cc.map((c) => c.email).join(", ") || "(none — EMAIL_CC_CENTRAL_COMMITTEE off)"} ` +
-              `Subject=${content.subject}`,
+            `[mail:dev] BATCH key=${groupKey} To=${toRecipients.map((r) => r.email).join(", ")} ` +
+              `Cc=${cc.map((c) => c.email).join(", ") || "(none)"} Subject=${subject}`,
           );
         } else {
           throw new Error(
@@ -472,13 +690,13 @@ export async function processPendingEmailQueue(limit = 100): Promise<{
         await sendGraphMail({
           toRecipients,
           ccRecipients: cc.length ? cc : undefined,
-          subject: content.subject,
+          subject,
           html,
           text,
         });
         console.info(
-          `[mail] BATCH sent type=${seed.notificationType} action=${seed.actionPointId} ` +
-            `to=${toRecipients.length} cc=${cc.length} ids=${group.map((g) => g.id).join(",")}`,
+          `[mail] BATCH sent key=${groupKey} to=${toRecipients.length} cc=${cc.length} ` +
+            `notifIds=${group.map((g) => g.id).join(",")}`,
         );
       }
 
@@ -486,6 +704,7 @@ export async function processPendingEmailQueue(limit = 100): Promise<{
         where: { id: { in: group.map((g) => g.id) } },
         data: { deliveryStatus: "SENT", sentAt: new Date(), errorMessage: null },
       });
+      recordMailBatchSent(group.length);
       sent += group.length;
     } catch (err) {
       const msg = String(err).slice(0, 500);
@@ -493,8 +712,9 @@ export async function processPendingEmailQueue(limit = 100): Promise<{
         where: { id: { in: group.map((g) => g.id) } },
         data: { deliveryStatus: "FAILED", errorMessage: msg },
       });
+      recordMailBatchFailed(group.length);
       failed += group.length;
-      console.error(`[mail] batch failed (${group.length} rows):`, msg);
+      console.error(`[mail] batch failed (${group.length} rows) key=…:`, msg);
     }
   }
 

@@ -45,7 +45,19 @@ export default function Committees() {
 
       {loading && <LoadingLogo scope="container" message="Loading committees..." />}
       {!loading && committees.length === 0 && (
-        <p className="card text-sm text-slate-400">No committees to show yet.</p>
+        <div className="card flex flex-col items-start gap-3 py-8 text-center sm:items-center">
+          <p className="text-base font-semibold text-slate-800 dark:text-slate-100">No committees yet</p>
+          <p className="max-w-md text-sm text-slate-500">
+            {canCreateCommittee(me)
+              ? "Create a committee to start scheduling meetings and tracking action points."
+              : "You are not a member of any committee yet. Ask a Central Committee administrator to add you."}
+          </p>
+          {canCreateCommittee(me) && (
+            <button type="button" className="btn-primary" onClick={() => setShowAdd(true)}>
+              Create committee
+            </button>
+          )}
+        </div>
       )}
 
       {!loading && committees.length > 0 && (
@@ -57,6 +69,8 @@ export default function Committees() {
                   <th className="px-4 py-3 font-semibold">Committee</th>
                   <th className="px-4 py-3 font-semibold">Code</th>
                   <th className="px-4 py-3 font-semibold">Your role</th>
+                  <th className="px-4 py-3 font-semibold">Next meeting</th>
+                  <th className="px-4 py-3 font-semibold">Distribution</th>
                   <th className="px-4 py-3 font-semibold">Frequency</th>
                   <th
                     className="px-4 py-3 font-semibold text-right"
@@ -110,6 +124,30 @@ export default function Committees() {
                       ) : (
                         <span className="text-xs text-slate-400">—</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
+                      {c.nextMeeting ? (
+                        <span
+                          className="cursor-pointer font-medium text-brand-700 hover:underline dark:text-brand-300"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/meetings/${c.nextMeeting!.id}`);
+                          }}
+                        >
+                          {new Date(c.nextMeeting.startsAt).toLocaleDateString(undefined, {
+                            day: "numeric",
+                            month: "short",
+                          })}
+                          <span className="mt-0.5 block max-w-[10rem] truncate font-normal text-slate-500">
+                            {c.nextMeeting.title}
+                          </span>
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="max-w-[9rem] truncate px-4 py-3 text-xs text-slate-500" title={c.distributionEmail ?? ""}>
+                      {c.distributionEmail ?? "—"}
                     </td>
                     <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{c.meetingFrequency ?? "—"}</td>
                     <td className="px-4 py-3 text-right font-medium tabular-nums">{c.totalActions}</td>

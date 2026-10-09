@@ -58,6 +58,17 @@ export async function listMeetingPapers(meetingId: number) {
   });
 }
 
+export async function downloadMeetingPaper(paperId: number) {
+  const row = await prisma.meetingPaper.findUnique({ where: { id: paperId } });
+  if (!row) throw Errors.notFound("Meeting paper");
+  const buffer = await readEvidenceFile(row.storageKey);
+  return {
+    buffer,
+    filename: row.filename || `paper-${paperId}`,
+    contentType: row.mediaType || "application/octet-stream",
+  };
+}
+
 /**
  * Email chair, secretary, central rep, active members (+ other stakeholders) in ONE message.
  * Includes Teams join link when present and attaches meeting papers.
@@ -99,11 +110,17 @@ export async function emailMeetingInvitation(meetingId: number): Promise<{
     if (!recipients.has(key)) recipients.set(key, name || email);
   };
 
-  add(meeting.committee.chairperson?.email, meeting.committee.chairperson?.fullName);
-  add(meeting.committee.secretary?.email, meeting.committee.secretary?.fullName);
-  add(meeting.committee.centralRep?.email, meeting.committee.centralRep?.fullName);
-  for (const m of meeting.committee.memberships) {
-    if (m.user.active) add(m.user.email, m.user.fullName);
+  // Prefer distribution list when set; otherwise expand to all members/officers
+  const distro = (meeting.committee as { distributionEmail?: string | null }).distributionEmail;
+  if (distro) {
+    add(distro, meeting.committee.name);
+  } else {
+    add(meeting.committee.chairperson?.email, meeting.committee.chairperson?.fullName);
+    add(meeting.committee.secretary?.email, meeting.committee.secretary?.fullName);
+    add(meeting.committee.centralRep?.email, meeting.committee.centralRep?.fullName);
+    for (const m of meeting.committee.memberships) {
+      if (m.user.active) add(m.user.email, m.user.fullName);
+    }
   }
   add(meeting.createdBy?.email, meeting.createdBy?.fullName);
 

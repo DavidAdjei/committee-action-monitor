@@ -26,8 +26,8 @@ export type MonthlyActionReport = {
   open: number;
   inProgress: number;
   overdue: number;
-  completionRate: number; // 0–100
-  avgProgress: number; // 0–100
+  completionRate: number;
+  avgProgress: number;
   byCommittee: {
     committeeId: number;
     name: string;
@@ -44,7 +44,7 @@ const COMPLETED: ActionStatus[] = ["COMPLETED"];
 
 export async function buildMonthlyActionReport(
   year: number,
-  month: number, // 1–12
+  month: number,
 ): Promise<MonthlyActionReport> {
   if (!Number.isInteger(year) || year < 2000 || year > 2100) {
     throw new Error("Invalid year");
@@ -54,7 +54,7 @@ export async function buildMonthlyActionReport(
   }
 
   const periodStart = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
-  const periodEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999)); // last day of month
+  const periodEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
   const actions = await prisma.actionPoint.findMany({
     where: {
@@ -156,30 +156,29 @@ export async function buildMonthlyActionReport(
 }
 
 export function reportToCsv(report: MonthlyActionReport): string {
-  const esc = (v: string | number | null | undefined) => {
-    const s = v == null ? "" : String(v);
-    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  const esc = (v: string | number) => {
+    const s = String(v ?? "");
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
     return s;
   };
-
   const lines: string[] = [];
-  lines.push(`Monthly Action Points Report — ${report.monthLabel}`);
+  lines.push(`Monthly Action Points Report,${esc(report.monthLabel)}`);
   lines.push(`Period,${report.periodStart},${report.periodEnd}`);
   lines.push(`Total,${report.total}`);
   lines.push(`Completed,${report.completed}`);
-  lines.push(`Completion rate (%),${report.completionRate}`);
-  lines.push(`Average progress (%),${report.avgProgress}`);
+  lines.push(`Completion rate %,${report.completionRate}`);
+  lines.push(`Average progress %,${report.avgProgress}`);
   lines.push(`Open,${report.open}`);
   lines.push(`In progress,${report.inProgress}`);
   lines.push(`Overdue,${report.overdue}`);
   lines.push("");
-  lines.push("Committee summary");
-  lines.push("Committee,Code,Total,Completed,Completion rate (%)");
+  lines.push("Committee,Code,Total,Completed,Completion rate %");
   for (const c of report.byCommittee) {
-    lines.push([c.name, c.code, c.total, c.completed, c.completionRate].map(esc).join(","));
+    lines.push(
+      [c.name, c.code, c.total, c.completed, c.completionRate].map(esc).join(","),
+    );
   }
   lines.push("");
-  lines.push("Action points");
   lines.push(
     "Reference,Title,Committee,Code,Owner,Status,Priority,Progress %,Deadline,Date raised,Revised deadline",
   );
@@ -205,7 +204,7 @@ export function reportToCsv(report: MonthlyActionReport): string {
   return lines.join("\n") + "\n";
 }
 
-/** Excel-compatible SpreadsheetML (.xls) — opens in Excel without extra deps. */
+/** Excel-compatible SpreadsheetML (.xls). */
 export function reportToSpreadsheetMl(report: MonthlyActionReport): string {
   const cell = (v: string | number) => {
     const s = String(v)
@@ -278,159 +277,355 @@ ${summaryRows.join("\n")}
 }
 
 /**
- * Minimal multi-page text PDF (no external deps).
- * Latin-1 safe: non-ASCII replaced for core font Helvetica.
+ * Branded multi-page PDF (no external deps).
+ * Header, KPI cards, status/completion bars, committee bars, action table.
  */
 export function reportToPdf(report: MonthlyActionReport): Buffer {
-  const safe = (s: string) =>
-    s.replace(/[^\x20-\x7E]/g, "?").replace(/\\/g, "\\\\").replace(/[()]/g, "");
-
-  const lines: string[] = [];
-  lines.push(`Committee Action Monitor`);
-  lines.push(`Monthly Action Points Report`);
-  lines.push(report.monthLabel);
-  lines.push(`Period: ${report.periodStart} to ${report.periodEnd}`);
-  lines.push("");
-  lines.push(`Total actions: ${report.total}`);
-  lines.push(`Completed: ${report.completed}`);
-  lines.push(`Completion rate: ${report.completionRate}%`);
-  lines.push(`Average progress: ${report.avgProgress}%`);
-  lines.push(`Open: ${report.open}  |  In progress: ${report.inProgress}  |  Overdue: ${report.overdue}`);
-  lines.push("");
-  lines.push("By committee:");
-  for (const c of report.byCommittee) {
-    lines.push(
-      `  ${c.code} ${c.name}: ${c.completed}/${c.total} (${c.completionRate}%)`,
-    );
-  }
-  lines.push("");
-  lines.push("Action points:");
-  for (const r of report.rows) {
-    lines.push(
-      `  ${r.referenceNo} | ${r.status} | ${r.progress}% | ${r.committeeCode} | ${r.owner}`,
-    );
-    lines.push(`    ${r.title}`);
-  }
-  if (report.rows.length === 0) {
-    lines.push("  (none in this month)");
-  }
-
-  // Paginate ~50 lines per page
-  const perPage = 48;
-  const pages: string[][] = [];
-  for (let i = 0; i < lines.length; i += perPage) {
-    pages.push(lines.slice(i, i + perPage));
-  }
-  if (pages.length === 0) pages.push(["(empty)"]);
-
-  const objects: string[] = [];
-  objects.push("1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n");
-
-  const kids: string[] = [];
-  let objNum = 3;
-  const pageObjs: { page: number; content: number }[] = [];
-
-  for (let p = 0; p < pages.length; p++) {
-    const contentNum = objNum + 1;
-    pageObjs.push({ page: objNum, content: contentNum });
-    kids.push(`${objNum} 0 R`);
-    objNum += 2;
-  }
-
-  objects.push(
-    `2 0 obj<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${pages.length} >>endobj\n`,
-  );
-
-  for (let i = 0; i < pages.length; i++) {
-    const { page, content } = pageObjs[i];
-    const pageLines = pages[i];
-    let y = 800;
-    const contentLines: string[] = ["BT", "/F1 10 Tf", "50 800 Td", "14 TL"];
-    for (let li = 0; li < pageLines.length; li++) {
-      const text = safe(pageLines[li]);
-      if (li === 0) {
-        contentLines.push(`(${text}) Tj`);
-      } else {
-        contentLines.push(`T* (${text}) Tj`);
-      }
-      y -= 14;
-    }
-    contentLines.push("ET");
-    const stream = contentLines.join("\n");
-    objects.push(
-      `${page} 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${content} 0 R /Resources << /Font << /F1 ${objNum} 0 R >> >> >>endobj\n`,
-    );
-    objects.push(
-      `${content} 0 obj<< /Length ${stream.length} >>stream\n${stream}\nendstream\nendobj\n`,
-    );
-  }
-
-  const fontObj = objNum;
-  objects.push(
-    `${fontObj} 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n`,
-  );
-
-  // Fix font refs - pages reference font at objNum but we need consistent numbering
-  // Rebuild with cleaner approach
-  return buildSimplePdf(lines.map(safe));
+  return buildBrandedPdf(report);
 }
 
-function buildSimplePdf(lines: string[]): Buffer {
-  const perPage = 50;
+function pdfSafe(s: string): string {
+  return String(s ?? "")
+    .replace(/[^\x20-\x7E]/g, "?")
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
+}
+
+type Rgb = [number, number, number];
+
+function rgbOp(c: Rgb, fill: boolean): string {
+  const [r, g, b] = c;
+  return fill ? `${r} ${g} ${b} rg` : `${r} ${g} ${b} RG`;
+}
+
+function rect(x: number, y: number, w: number, h: number, fill: Rgb, stroke?: Rgb): string[] {
+  const ops = [rgbOp(fill, true), `${x} ${y} ${w} ${h} re`, "f"];
+  if (stroke) {
+    ops.push(rgbOp(stroke, false), "0.5 w", `${x} ${y} ${w} ${h} re`, "S");
+  }
+  return ops;
+}
+
+function textAt(
+  x: number,
+  y: number,
+  text: string,
+  size: number,
+  color: Rgb = [0.1, 0.12, 0.18],
+  font = "F1",
+): string[] {
+  return [
+    "BT",
+    rgbOp(color, true),
+    `/${font} ${size} Tf`,
+    `${x} ${y} Td`,
+    `(${pdfSafe(text)}) Tj`,
+    "ET",
+  ];
+}
+
+function hBar(
+  x: number,
+  y: number,
+  maxW: number,
+  h: number,
+  pct: number,
+  fill: Rgb,
+  track: Rgb = [0.9, 0.92, 0.95],
+): string[] {
+  const w = (Math.max(0, Math.min(100, pct)) / 100) * maxW;
+  const ops = [...rect(x, y, maxW, h, track)];
+  if (w > 0) ops.push(...rect(x, y, w, h, fill));
+  return ops;
+}
+
+function buildBrandedPdf(report: MonthlyActionReport): Buffer {
+  const brand: Rgb = [0.05, 0.35, 0.65];
+  const brandLight: Rgb = [0.75, 0.85, 0.95];
+  const emerald: Rgb = [0.02, 0.55, 0.35];
+  const amber: Rgb = [0.85, 0.5, 0.05];
+  const rose: Rgb = [0.75, 0.15, 0.2];
+  const slate: Rgb = [0.4, 0.45, 0.52];
+  const ink: Rgb = [0.1, 0.12, 0.18];
+  const white: Rgb = [1, 1, 1];
+  const rowAlt: Rgb = [0.96, 0.97, 0.98];
+  const trackGrey: Rgb = [0.9, 0.92, 0.95];
+
+  const pageW = 612;
+  const pageH = 792;
+  const margin = 40;
+  const contentW = pageW - margin * 2;
+
   const pages: string[][] = [];
-  for (let i = 0; i < Math.max(lines.length, 1); i += perPage) {
-    pages.push(lines.slice(i, i + perPage));
+  const p1: string[] = [];
+
+  p1.push(...rect(0, pageH - 72, pageW, 72, brand));
+  p1.push(...textAt(margin, pageH - 32, "Committee Action Monitor", 11, white, "F1"));
+  p1.push(...textAt(margin, pageH - 52, "Monthly Action Points Report", 18, white, "F2"));
+  p1.push(...textAt(pageW - margin - 100, pageH - 40, report.monthLabel, 12, white, "F2"));
+
+  let y = pageH - 96;
+  p1.push(
+    ...textAt(
+      margin,
+      y,
+      `Period ${report.periodStart}  to  ${report.periodEnd}   |   Central Committee oversight`,
+      9,
+      slate,
+    ),
+  );
+
+  y = pageH - 200;
+  const cardW = (contentW - 18) / 4;
+  const cardH = 78;
+  const kpis: { label: string; value: string; sub: string; accent: Rgb }[] = [
+    { label: "CREATED", value: String(report.total), sub: "actions this month", accent: brand },
+    {
+      label: "COMPLETED",
+      value: String(report.completed),
+      sub: `${report.completionRate}% rate`,
+      accent: emerald,
+    },
+    {
+      label: "OVERDUE",
+      value: String(report.overdue),
+      sub: "past deadline",
+      accent: report.overdue > 0 ? rose : emerald,
+    },
+    {
+      label: "AVG PROGRESS",
+      value: `${report.avgProgress}%`,
+      sub: "mean progress",
+      accent: amber,
+    },
+  ];
+  kpis.forEach((k, i) => {
+    const x = margin + i * (cardW + 6);
+    p1.push(...rect(x, y, cardW, cardH, white, [0.88, 0.9, 0.93]));
+    p1.push(...rect(x, y + cardH - 4, cardW, 4, k.accent));
+    p1.push(...textAt(x + 10, y + cardH - 22, k.label, 7, slate, "F1"));
+    p1.push(...textAt(x + 10, y + 28, k.value, 22, ink, "F2"));
+    p1.push(...textAt(x + 10, y + 12, k.sub, 8, slate, "F1"));
+  });
+
+  y = y - 36;
+  p1.push(...textAt(margin, y, "Status mix", 11, ink, "F2"));
+  y -= 18;
+  const barMax = Math.max(report.total, 1);
+  const barH = 14;
+  const barY = y - 4;
+  p1.push(...rect(margin, barY, contentW, barH, trackGrey));
+  let segX = margin;
+  for (const s of [
+    { n: report.open, c: brand },
+    { n: report.inProgress, c: amber },
+    { n: report.completed, c: emerald },
+  ] as { n: number; c: Rgb }[]) {
+    const w = (s.n / barMax) * contentW;
+    if (w > 0.5) {
+      p1.push(...rect(segX, barY, w, barH, s.c));
+      segX += w;
+    }
+  }
+  y = barY - 16;
+  let legendX = margin;
+  for (const s of [
+    { label: "Open", count: report.open, color: brand },
+    { label: "In progress", count: report.inProgress, color: amber },
+    { label: "Completed", count: report.completed, color: emerald },
+    { label: "Overdue", count: report.overdue, color: rose },
+  ] as { label: string; count: number; color: Rgb }[]) {
+    p1.push(...rect(legendX, y - 1, 8, 8, s.color));
+    p1.push(...textAt(legendX + 12, y, `${s.label}: ${s.count}`, 8, slate));
+    legendX += 100;
+  }
+  y -= 14;
+  p1.push(
+    ...textAt(
+      margin,
+      y,
+      "Overdue counts non-completed items past deadline (can overlap Open / In progress).",
+      7,
+      slate,
+    ),
+  );
+
+  y -= 28;
+  p1.push(...textAt(margin, y, "Overall completion rate", 11, ink, "F2"));
+  y -= 8;
+  p1.push(...hBar(margin, y - 12, contentW - 50, 12, report.completionRate, emerald));
+  p1.push(...textAt(margin + contentW - 42, y - 10, `${report.completionRate}%`, 10, emerald, "F2"));
+
+  y -= 36;
+  p1.push(...textAt(margin, y, "By committee", 11, ink, "F2"));
+  y -= 6;
+  const committees = report.byCommittee.slice(0, 12);
+  if (committees.length === 0) {
+    y -= 14;
+    p1.push(...textAt(margin, y, "No actions created in this period.", 9, slate));
+  } else {
+    const maxTotal = Math.max(...committees.map((c) => c.total), 1);
+    for (const c of committees) {
+      y -= 22;
+      if (y < 80) break;
+      const label = `${c.code}  ${c.name}`.slice(0, 42);
+      p1.push(...textAt(margin, y + 6, label, 8, ink));
+      p1.push(
+        ...textAt(
+          margin + contentW - 70,
+          y + 6,
+          `${c.completed}/${c.total}  ${c.completionRate}%`,
+          8,
+          slate,
+        ),
+      );
+      const fullTrack = contentW * 0.55;
+      p1.push(...rect(margin, y - 6, fullTrack, 6, trackGrey));
+      const volW = fullTrack * (c.total / maxTotal);
+      if (volW > 0.5) {
+        p1.push(...rect(margin, y - 6, volW, 6, brandLight));
+        const fillW = volW * (Math.max(0, Math.min(100, c.completionRate)) / 100);
+        if (fillW > 0.5) p1.push(...rect(margin, y - 6, fillW, 6, emerald));
+      }
+    }
+    if (report.byCommittee.length > committees.length) {
+      y -= 16;
+      p1.push(
+        ...textAt(
+          margin,
+          y,
+          `+ ${report.byCommittee.length - committees.length} more committees (see Excel/CSV for full list)`,
+          8,
+          slate,
+        ),
+      );
+    }
   }
 
-  const parts: string[] = ["%PDF-1.4\n"];
-  const offsets: number[] = [0];
+  p1.push(...rect(0, 0, pageW, 36, [0.96, 0.97, 0.98]));
+  p1.push(
+    ...textAt(margin, 14, "Committee Action Monitor  |  Confidential  |  Page 1", 8, slate),
+  );
+  pages.push(p1);
 
-  const addObj = (body: string) => {
-    offsets.push(Buffer.byteLength(parts.join(""), "latin1"));
-    parts.push(`${offsets.length - 1} 0 obj\n${body}\nendobj\n`);
+  const colX = {
+    ref: margin,
+    title: margin + 78,
+    committee: margin + 250,
+    owner: margin + 330,
+    status: margin + 430,
+    prog: margin + 490,
+    due: margin + 530,
+  };
+  const rowH = 16;
+  const headerH = 20;
+  const tableTop = pageH - 100;
+  const tableBottom = 50;
+
+  const drawTableHeader = (ops: string[], topY: number) => {
+    ops.push(...rect(margin, topY - 4, contentW, headerH, brand));
+    const hy = topY + 2;
+    ops.push(...textAt(colX.ref, hy, "Reference", 8, white, "F2"));
+    ops.push(...textAt(colX.title, hy, "Title", 8, white, "F2"));
+    ops.push(...textAt(colX.committee, hy, "Committee", 8, white, "F2"));
+    ops.push(...textAt(colX.owner, hy, "Owner", 8, white, "F2"));
+    ops.push(...textAt(colX.status, hy, "Status", 8, white, "F2"));
+    ops.push(...textAt(colX.prog, hy, "%", 8, white, "F2"));
+    ops.push(...textAt(colX.due, hy, "Deadline", 8, white, "F2"));
   };
 
-  // We'll rebuild offsets properly
-  const objs: string[] = [];
-  objs.push(""); // 1-based
+  const statusColor = (s: string): Rgb => {
+    const u = s.toUpperCase();
+    if (u === "COMPLETED") return emerald;
+    if (u === "IN_PROGRESS") return amber;
+    if (u === "OPEN") return brand;
+    return slate;
+  };
 
-  // Font
-  // Pages tree built after page objects
+  if (report.rows.length === 0) {
+    const pEmpty: string[] = [];
+    pEmpty.push(...rect(0, pageH - 56, pageW, 56, brand));
+    pEmpty.push(...textAt(margin, pageH - 36, "Action points detail", 14, white, "F2"));
+    pEmpty.push(
+      ...textAt(margin, pageH - 90, "No action points were created in this period.", 10, slate),
+    );
+    pEmpty.push(...rect(0, 0, pageW, 36, [0.96, 0.97, 0.98]));
+    pEmpty.push(...textAt(margin, 14, "Committee Action Monitor  |  Page 2", 8, slate));
+    pages.push(pEmpty);
+  } else {
+    let rowIndex = 0;
+    let pageNum = 2;
+    while (rowIndex < report.rows.length) {
+      const ops: string[] = [];
+      ops.push(...rect(0, pageH - 56, pageW, 56, brand));
+      ops.push(...textAt(margin, pageH - 28, "Action points detail", 14, white, "F2"));
+      ops.push(
+        ...textAt(
+          margin,
+          pageH - 44,
+          `${report.monthLabel}  |  ${report.rows.length} action(s)`,
+          9,
+          brandLight,
+        ),
+      );
 
-  const contentIds: number[] = [];
-  const pageIds: number[] = [];
+      let ty = tableTop;
+      drawTableHeader(ops, ty);
+      ty -= headerH + 4;
 
-  // Reserve: 1=catalog, 2=pages, 3=font, then pairs of page+content
-  // Simpler sequential:
+      while (rowIndex < report.rows.length && ty >= tableBottom) {
+        const r = report.rows[rowIndex];
+        if (rowIndex % 2 === 1) {
+          ops.push(...rect(margin, ty - 4, contentW, rowH, rowAlt));
+        }
+        const sc = statusColor(r.status);
+        ops.push(...rect(colX.status - 2, ty - 2, 52, 12, sc));
+        ops.push(...textAt(colX.ref, ty, r.referenceNo.slice(0, 12), 7, ink));
+        ops.push(...textAt(colX.title, ty, r.title.slice(0, 28), 7, ink));
+        ops.push(...textAt(colX.committee, ty, r.committeeCode.slice(0, 10), 7, slate));
+        ops.push(...textAt(colX.owner, ty, r.owner.slice(0, 16), 7, slate));
+        ops.push(
+          ...textAt(colX.status, ty, r.status.replace(/_/g, " ").slice(0, 10), 6, white),
+        );
+        ops.push(...textAt(colX.prog, ty, String(r.progress), 7, ink));
+        ops.push(...textAt(colX.due, ty, r.deadline.slice(0, 10), 7, slate));
+        ty -= rowH;
+        rowIndex += 1;
+      }
 
-  let n = 1;
-  const catalogId = n++;
-  const pagesId = n++;
-  const fontId = n++;
-
-  const pageContentPairs: { pageId: number; contentId: number; stream: string }[] = [];
-  for (const pageLines of pages) {
-    const pageId = n++;
-    const contentId = n++;
-    const ops = ["BT", "/F1 9 Tf", "40 802 Td", "11 TL"];
-    pageLines.forEach((line, idx) => {
-      const t = line.slice(0, 110);
-      if (idx === 0) ops.push(`(${t}) Tj`);
-      else ops.push(`T* (${t}) Tj`);
-    });
-    ops.push("ET");
-    const stream = ops.join("\n");
-    pageContentPairs.push({ pageId, contentId, stream });
+      ops.push(...rect(0, 0, pageW, 36, [0.96, 0.97, 0.98]));
+      ops.push(
+        ...textAt(
+          margin,
+          14,
+          `Committee Action Monitor  |  Confidential  |  Page ${pageNum}`,
+          8,
+          slate,
+        ),
+      );
+      pages.push(ops);
+      pageNum += 1;
+    }
   }
 
-  const out: string[] = [];
-  const off: number[] = [0];
-  const write = (s: string) => {
-    off.push(Buffer.byteLength(out.join(""), "latin1"));
-    out.push(s);
-  };
+  return assemblePdf(pages);
+}
 
-  // Actually track byte length correctly
+function assemblePdf(pageOps: string[][]): Buffer {
+  const catalogId = 1;
+  const pagesId = 2;
+  const fontReg = 3;
+  const fontBold = 4;
+  let nextId = 5;
+
+  const pagePairs: { pageId: number; contentId: number; stream: string }[] = [];
+  for (const ops of pageOps) {
+    const pageId = nextId++;
+    const contentId = nextId++;
+    pagePairs.push({ pageId, contentId, stream: ops.join("\n") });
+  }
+
   let pdf = "%PDF-1.4\n";
   const offs: number[] = [0];
   const emit = (s: string) => {
@@ -439,26 +634,28 @@ function buildSimplePdf(lines: string[]): Buffer {
   };
 
   emit(`${catalogId} 0 obj<< /Type /Catalog /Pages ${pagesId} 0 R >>endobj\n`);
-  const kids = pageContentPairs.map((p) => `${p.pageId} 0 R`).join(" ");
+  const kids = pagePairs.map((p) => `${p.pageId} 0 R`).join(" ");
   emit(
-    `${pagesId} 0 obj<< /Type /Pages /Kids [${kids}] /Count ${pageContentPairs.length} >>endobj\n`,
+    `${pagesId} 0 obj<< /Type /Pages /Kids [${kids}] /Count ${pagePairs.length} >>endobj\n`,
   );
   emit(
-    `${fontId} 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n`,
+    `${fontReg} 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n`,
+  );
+  emit(
+    `${fontBold} 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>endobj\n`,
   );
 
-  for (const p of pageContentPairs) {
+  for (const p of pagePairs) {
     emit(
-      `${p.pageId} 0 obj<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 612 792] /Contents ${p.contentId} 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> >>endobj\n`,
+      `${p.pageId} 0 obj<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 612 792] /Contents ${p.contentId} 0 R /Resources << /Font << /F1 ${fontReg} 0 R /F2 ${fontBold} 0 R >> >> >>endobj\n`,
     );
+    const len = Buffer.byteLength(p.stream, "latin1");
     emit(
-      `${p.contentId} 0 obj<< /Length ${Buffer.byteLength(p.stream, "latin1")} >>stream\n${p.stream}\nendstream\nendobj\n`,
+      `${p.contentId} 0 obj<< /Length ${len} >>stream\n${p.stream}\nendstream\nendobj\n`,
     );
   }
 
   const xrefPos = Buffer.byteLength(pdf, "latin1");
-  const count = offs.length; // next object number = offs.length
-  // offs[0]=0 unused; object i is at offs[i]
   let xref = `xref\n0 ${offs.length}\n`;
   xref += `0000000000 65535 f \n`;
   for (let i = 1; i < offs.length; i++) {

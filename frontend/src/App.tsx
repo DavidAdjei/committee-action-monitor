@@ -10,12 +10,14 @@ import Dashboard from "@/pages/Dashboard";
 import Committees from "@/pages/Committees";
 import CommitteeWorkspace from "@/pages/CommitteeWorkspace";
 import ActionPoints from "@/pages/ActionPoints";
+import ActionDetailPage from "@/pages/ActionDetailPage";
 import Notifications from "@/pages/Notifications";
 import MeetingDetailPage from "@/pages/MeetingDetail";
 import ReportsPage from "@/pages/Reports";
 import CalendarPage from "@/pages/Calendar";
 import { LoadingLogo } from "@/components/LoadingLogo";
 import { isEntraConfigured } from "@/auth/msalConfig";
+import { homePathFor } from "@/lib/homePath";
 
 /**
  * Route guard:
@@ -81,7 +83,7 @@ function SignInRoute() {
           {loading ? (
             <LoadingLogo scope="fullscreen" message="Signing you in…" />
           ) : (
-            <Navigate to="/committees" replace />
+            <Navigate to={homePathFor(me)} replace />
           )}
         </AuthenticatedTemplate>
         <UnauthenticatedTemplate>
@@ -94,8 +96,13 @@ function SignInRoute() {
   if (loading) {
     return <LoadingLogo scope="fullscreen" message="Loading…" />;
   }
-  if (me) return <Navigate to="/committees" replace />;
+  if (me) return <Navigate to={homePathFor(me)} replace />;
   return <DevSignIn />;
+}
+
+function HomeRedirect() {
+  const { me } = useAuth();
+  return <Navigate to={homePathFor(me)} replace />;
 }
 
 export default function App() {
@@ -135,6 +142,14 @@ export default function App() {
         }
       />
       <Route
+        path="/actions/:actionId"
+        element={
+          <RequireAuth>
+            <ActionDetailPage />
+          </RequireAuth>
+        }
+      />
+      <Route
         path="/calendar"
         element={
           <RequireAuth>
@@ -166,7 +181,14 @@ export default function App() {
           </RequireAuth>
         }
       />
-      <Route path="*" element={<Navigate to="/committees" replace />} />
+      <Route
+        path="*"
+        element={
+          <RequireAuth>
+            <HomeRedirect />
+          </RequireAuth>
+        }
+      />
     </Routes>
   );
 }

@@ -7,6 +7,7 @@ import { prisma } from "../lib/prisma";
 import { Errors } from "../lib/http";
 import { storeEvidenceFile, readEvidenceFile } from "./storageService";
 import { auditRow } from "./auditService";
+import { triggerEmailDispatchAsync } from "./notificationService";
 
 const DRAFT_EXTS = [".pdf", ".doc", ".docx"];
 const FINAL_EXTS = [".pdf"];
@@ -23,6 +24,8 @@ export async function uploadMinutesDocument(params: {
   mediaType: string;
   buffer: Buffer;
   discussion?: string;
+  /** When true, queue MINUTES_ISSUED to committee members (email + in-app) */
+  notifyMinutesIssued?: boolean;
 }) {
   const meeting = await prisma.meeting.findUnique({ where: { id: params.meetingId } });
   if (!meeting) throw Errors.notFound("Meeting");
@@ -86,12 +89,65 @@ export async function uploadMinutesDocument(params: {
       resourceType: "meeting_minutes",
       resourceId: row.id,
       committeeId: meeting.committeeId,
-      after: { status: params.status, filename: params.filename },
+      after: {
+        status: params.status,
+        filename: params.filename,
+        notifyMinutesIssued: Boolean(params.notifyMinutesIssued),
+      },
       result: "SUCCESS",
     }),
   });
 
+  if (params.notifyMinutesIssued) {
+    await queueMinutesIssuedNotifications({
+      meetingId: params.meetingId,
+      committeeId: meeting.committeeId,
+      minutesId: row.id,
+      status: params.status,
+    });
+    triggerEmailDispatchAsync();
+  }
+
   return row;
+}
+
+async function queueMinutesIssuedNotifications(params: {
+  meetingId: number;
+  committeeId: number;
+  minutesId: number;
+  status: "DRAFT" | "FINAL";
+}) {
+  const committee = await prisma.committee.findUnique({
+    where: { id: params.committeeId },
+    include: {
+      memberships: { where: { active: true }, select: { userId: true } },
+    },
+  });
+  if (!committee) return;
+
+  const recipientIds = new Set<number>();
+  recipientIds.add(committee.chairpersonId);
+  recipientIds.add(committee.secretaryId);
+  if (committee.centralRepId) recipientIds.add(committee.centralRepId);
+  for (const m of committee.memberships) recipientIds.add(m.userId);
+
+  const day = new Date().toISOString().slice(0, 10);
+  const kind = params.status.toLowerCase();
+  const rows = [];
+  for (const recipientId of recipientIds) {
+    for (const channel of ["EMAIL", "IN_APP"] as const) {
+      rows.push({
+        actionPointId: null as number | null,
+        recipientId,
+        channel,
+        notificationType: "MINUTES_ISSUED" as const,
+        idempotencyKey: `minutes:${params.minutesId}:${params.status}:${channel}:${recipientId}:${day}`,
+        scheduledFor: new Date(),
+      });
+    }
+  }
+  if (rows.length === 0) return;
+  await prisma.notification.createMany({ data: rows, skipDuplicates: true });
 }
 
 export async function downloadMinutesDocument(minutesId: number) {

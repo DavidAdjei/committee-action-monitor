@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Download, MessageSquare, Search } from "lucide-react";
 import { useFlash } from "@/state/toastContext";
 import { useAuth } from "@/state/authContext";
 import { endpoints } from "@/api/endpoints";
 import { StatusPill, DueBadge, ProgressBar, formatDate } from "@/components/StatusBits";
-import { ActionDetailPanel } from "@/components/ActionDetailPanel";
 import { ActionCommentsModal } from "@/components/modals/ActionCommentsModal";
 import { LoadingLogo } from "@/components/LoadingLogo";
 import type { ActionListItem, CommitteeSummary } from "@/types";
@@ -13,8 +13,11 @@ const STATUS_FILTERS = ["All", "Open", "In Progress", "Pending Verification", "O
 
 export default function ActionPoints() {
   const flash = useFlash();
+  const navigate = useNavigate();
   const { me } = useAuth();
   const isCentral = Boolean(me?.isCentralCommittee || me?.isAdmin);
+  /** Central/admin: bank-wide vs personal ownership list */
+  const [scope, setScope] = useState<"mine" | "all">(isCentral ? "all" : "mine");
   const [exporting, setExporting] = useState(false);
   const [items, setItems] = useState<ActionListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -23,7 +26,6 @@ export default function ActionPoints() {
   const [committeeId, setCommitteeId] = useState<number | "">("");
   const [committees, setCommittees] = useState<CommitteeSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [openActionId, setOpenActionId] = useState<number | null>(null);
   const [commentsFor, setCommentsFor] = useState<{
     id: number;
     referenceNo: string;
@@ -57,7 +59,7 @@ export default function ActionPoints() {
     const handle = window.setTimeout(load, 200);
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, query, committeeId]);
+  }, [status, query, committeeId, scope, isCentral]);
 
   return (
     <div className="space-y-5">
@@ -136,7 +138,34 @@ export default function ActionPoints() {
         {loading ? (
           <LoadingLogo scope="container" message="Loading actions…" />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Mobile-friendly cards */}
+          <div className="space-y-2 md:hidden">
+            {items.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => navigate(`/actions/${a.id}`)}
+                className="w-full rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm dark:border-slate-700 dark:bg-slate-900"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">{a.title}</p>
+                  <StatusPill status={a.status} />
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {a.committee?.name ?? "—"} · {a.owner.fullName}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <DueBadge deadline={a.deadline} status={a.status} />
+                  <span className="text-slate-400">{a.progress}%</span>
+                </div>
+              </button>
+            ))}
+            {items.length === 0 && (
+              <p className="py-8 text-center text-sm text-slate-500">No action points here</p>
+            )}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400 dark:border-slate-700">
@@ -154,7 +183,7 @@ export default function ActionPoints() {
                 {items.map((a) => (
                   <tr
                     key={a.id}
-                    onClick={() => setOpenActionId(a.id)}
+                    onClick={() => navigate(`/actions/${a.id}`)}
                     className="cursor-pointer border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50 dark:border-slate-800"
                   >
                     <td className="py-2.5 pr-3">{a.title}</td>
@@ -213,21 +242,24 @@ export default function ActionPoints() {
                 ))}
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400">
-                      No action points match this filter.
+                    <td colSpan={8} className="py-10 text-center">
+                      <p className="font-semibold text-slate-700 dark:text-slate-200">No action points here</p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        Try another status filter, or open a committee workspace to create actions.
+                      </p>
+                      <Link to="/committees" className="btn-primary mt-4 inline-flex text-sm">
+                        Go to committees
+                      </Link>
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+          </>
         )}
         <p className="mt-3 text-xs text-slate-400">{total} action{total === 1 ? "" : "s"} · newest first</p>
       </div>
-
-      {openActionId && (
-        <ActionDetailPanel actionId={openActionId} onClose={() => setOpenActionId(null)} onChanged={load} />
-      )}
       {commentsFor && (
         <ActionCommentsModal
           actionId={commentsFor.id}

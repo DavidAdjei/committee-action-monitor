@@ -9,7 +9,6 @@ import { ImportDocumentModal } from "@/components/modals/ImportDocumentModal";
 import { AddMemberModal } from "@/components/modals/AddMemberModal";
 import { SetChairModal } from "@/components/modals/SetChairModal";
 import { SetCentralRepModal } from "@/components/modals/SetCentralRepModal";
-import { ActionDetailPanel } from "@/components/ActionDetailPanel";
 import { ActionCommentsModal } from "@/components/modals/ActionCommentsModal";
 import { MinutesDetailPanel } from "@/components/MinutesDetailPanel";
 import { LoadingLogo } from "@/components/LoadingLogo";
@@ -60,7 +59,6 @@ export default function CommitteeWorkspace() {
   const [showAddMember, setShowAddMember] = useState(false);
   const [showSetChair, setShowSetChair] = useState(false);
   const [showSetCentralRep, setShowSetCentralRep] = useState(false);
-  const [openActionId, setOpenActionId] = useState<number | null>(null);
   const [minutesList, setMinutesList] = useState<MeetingMinutes[]>([]);
   const [minutesLoading, setMinutesLoading] = useState(false);
   const [openMinutesId, setOpenMinutesId] = useState<number | null>(null);
@@ -70,6 +68,15 @@ export default function CommitteeWorkspace() {
     checkInUrl: string;
   } | null>(null);
   const [projectLoadingId, setProjectLoadingId] = useState<number | null>(null);
+  const [distroDraft, setDistroDraft] = useState("");
+  const [distroBusy, setDistroBusy] = useState(false);
+  const [showSecTip, setShowSecTip] = useState(() => {
+    try {
+      return localStorage.getItem("cam.secretaryTip.dismissed") !== "1";
+    } catch {
+      return true;
+    }
+  });
 
   const handleAccessDenied = (err: unknown) => {
     const message =
@@ -155,6 +162,11 @@ export default function CommitteeWorkspace() {
     }
   };
 
+  useEffect(() => {
+    if (detail?.distributionEmail != null) setDistroDraft(detail.distributionEmail);
+    else if (detail) setDistroDraft("");
+  }, [detail?.id, detail?.distributionEmail]);
+
   if (loadError) {
     return (
       <div className="card border-red-200 bg-red-50 p-6 text-center dark:border-red-900 dark:bg-red-950">
@@ -183,6 +195,34 @@ export default function CommitteeWorkspace() {
 
   return (
     <div className="space-y-5">
+      {canEdit && showSecTip && (
+        <div className="rounded-xl border border-brand-200 bg-brand-50/80 px-4 py-3 text-sm dark:border-brand-800 dark:bg-brand-950/30">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="font-semibold text-brand-900 dark:text-brand-100">Secretary quick start</p>
+              <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-xs text-brand-800 dark:text-brand-200">
+                <li>Schedule a meeting (optional Teams + papers).</li>
+                <li>After it runs: record outcome → upload minutes → raise actions.</li>
+                <li>Owners get email; you verify completion when they submit.</li>
+              </ol>
+            </div>
+            <button
+              type="button"
+              className="text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300"
+              onClick={() => {
+                try {
+                  localStorage.setItem("cam.secretaryTip.dismissed", "1");
+                } catch {
+                  /* ignore */
+                }
+                setShowSecTip(false);
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex items-center gap-2.5">
@@ -225,6 +265,53 @@ export default function CommitteeWorkspace() {
               </>
             )}
           </p>
+          {(canEdit || me?.isAdmin) && (
+            <div className="mt-2 flex flex-wrap items-end gap-2 text-sm">
+              <label className="field-label min-w-[220px] flex-1">
+                Distribution email
+                <input
+                  className="field-input"
+                  type="email"
+                  placeholder="e.g. ALCO@myumbbank.com"
+                  value={distroDraft}
+                  onChange={(e) => setDistroDraft(e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn text-xs"
+                disabled={distroBusy}
+                onClick={() => {
+                  void (async () => {
+                    setDistroBusy(true);
+                    try {
+                      await endpoints.setCommitteeDistributionEmail(
+                        committeeId,
+                        distroDraft.trim() || null,
+                      );
+                      flash("Distribution email saved");
+                      await refreshAll();
+                    } catch (err: unknown) {
+                      flash(
+                        err instanceof ApiClientError ? err.message : "Could not save distribution email.",
+                        "error",
+                      );
+                    } finally {
+                      setDistroBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {distroBusy ? "Saving…" : "Save"}
+              </button>
+            </div>
+          )}
+          {!canEdit && !me?.isAdmin && detail.distributionEmail && (
+            <p className="mt-1 text-xs text-slate-500">
+              Distribution list: {detail.distributionEmail}
+            </p>
+          )}
+
         </div>
 
         {/* Action / Governance Buttons */}
@@ -402,7 +489,7 @@ export default function CommitteeWorkspace() {
               {detail.pendingVerification.map((p) => (
                 <button
                   key={p.id}
-                  onClick={() => setOpenActionId(p.id)}
+                  onClick={() => navigate(`/actions/${p.id}`)}
                   className="flex w-full items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm hover:bg-amber-100 dark:hover:bg-amber-900/40"
                 >
                   <span>
@@ -547,7 +634,7 @@ export default function CommitteeWorkspace() {
               {actions.map((a) => (
                 <tr
                   key={a.id}
-                  onClick={() => setOpenActionId(a.id)}
+                  onClick={() => navigate(`/actions/${a.id}`)}
                   className="cursor-pointer border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-800/50"
                 >
                   <td className="py-2.5">{a.title}</td>
@@ -724,9 +811,6 @@ export default function CommitteeWorkspace() {
           onClose={() => setShowNewMeeting(false)}
           onCreated={refreshAll}
         />
-      )}
-      {openActionId && (
-        <ActionDetailPanel actionId={openActionId} onClose={() => setOpenActionId(null)} onChanged={refreshAll} />
       )}
       {commentsFor && (
         <ActionCommentsModal

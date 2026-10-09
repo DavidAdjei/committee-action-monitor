@@ -65,7 +65,9 @@ export interface CreateActionPointInput {
  * additional selected stakeholders, and queue immediate notifications for
  * all of them — all inside one transaction.
  */
-export async function createActionPoint(input: CreateActionPointInput) {
+export async function createActionPoint(
+  input: CreateActionPointInput & { /** When true, queue notifications but do not flush the mail worker (bulk import). */ skipEmailDispatch?: boolean },
+) {
   const meeting = await prisma.meeting.findUnique({
     where: { id: input.meetingId },
     include: { committee: true },
@@ -134,6 +136,8 @@ export async function createActionPoint(input: CreateActionPointInput) {
       data: buildActionNotifications({
         actionPointId: action.id,
         recipientIds: uniqueStakeholders.map((s) => s.userId),
+        // Email goes to action owners only; secretary + central DL are CC'd at send time
+        emailRecipientIds: ownerIds,
         notificationType: "CREATED",
       }),
       skipDuplicates: true,
@@ -154,7 +158,9 @@ export async function createActionPoint(input: CreateActionPointInput) {
 
     return action;
   });
-    triggerEmailDispatchAsync();
+    if (!input.skipEmailDispatch) {
+      triggerEmailDispatchAsync();
+    }
     return created;
   } catch (err) {
     if (isUniqueConflict(err) && attempt < maxAttempts - 1) {

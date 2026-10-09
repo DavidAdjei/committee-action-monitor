@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { Errors } from "../lib/http";
 import { auditRow } from "./auditService";
 import { createActionPoint } from "./actionService";
+import { triggerEmailDispatchAsync } from "./notificationService";
 export interface ImportActionDraft {
   title: string;
   description?: string;
@@ -170,6 +171,7 @@ export async function importMinutesWithActions(input: ImportMinutesInput) {
         : new Date(Date.now() + 14 * 24 * 3600_000);
 
     const created = await createActionPoint({
+      skipEmailDispatch: true,
       meetingId: input.meetingId,
       committeeId: meeting.committeeId,
       title,
@@ -259,5 +261,7 @@ export async function importMinutesWithActions(input: ImportMinutesInput) {
     return row;
   });
 
+  // One mail flush after the whole import so CREATED digests can batch per owner
+  triggerEmailDispatchAsync();
   return { minutes, actions: resolved };
 }

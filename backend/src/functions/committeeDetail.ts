@@ -14,7 +14,7 @@ import {
 import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
 import { committeeSummary } from "../services/reportService";
 import { recordDenied } from "../services/auditService";
-import { addCommitteeMember, setCommitteeChair, removeCommitteeMember, setCommitteeCentralRep } from "../services/committeeService";
+import { addCommitteeMember, setCommitteeChair, removeCommitteeMember, setCommitteeCentralRep, updateCommitteeDistributionEmail } from "../services/committeeService";
 
 async function committeeDetail(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
@@ -67,6 +67,7 @@ async function committeeDetail(req: HttpRequest, _ctx: InvocationContext): Promi
       code: committee.code,
       mandate: committee.mandate,
       meetingFrequency: committee.meetingFrequency,
+      distributionEmail: committee.distributionEmail,
       chairperson: { id: committee.chairperson.id, fullName: committee.chairperson.fullName },
       secretary: { id: committee.secretary.id, fullName: committee.secretary.fullName },
       centralRep: committee.centralRep
@@ -295,3 +296,35 @@ app.http("setCommitteeCentralRep", {
   route: "committees/{id}/central-rep",
   handler: setCentralRepHandler,
 });
+
+async function setDistributionEmailHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const committeeId = Number(req.params.id);
+    if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
+
+    // Chair, secretary, or platform admin
+    if (!isPlatformAdmin(user)) {
+      await requireCommitteeOfficer(user, committeeId);
+    }
+
+    const body = (await req.json()) as { distributionEmail?: string | null };
+    const updated = await updateCommitteeDistributionEmail({
+      committeeId,
+      distributionEmail: body.distributionEmail === undefined ? null : body.distributionEmail,
+      actorUserId: user.id,
+    });
+    return ok(updated);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+app.http("setCommitteeDistributionEmail", {
+  methods: ["PATCH", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "committees/{id}/distribution-email",
+  handler: setDistributionEmailHandler,
+});
+

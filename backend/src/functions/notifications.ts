@@ -2,6 +2,8 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/fu
 import { prisma } from "../lib/prisma";
 import { requireUser } from "../lib/auth";
 import { ok, errorResponse, preflight, Errors } from "../lib/http";
+import { isPlatformAdmin } from "../lib/authorize";
+import { processPendingEmailQueue } from "../services/emailDispatchService";
 
 async function listNotifications(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
@@ -118,4 +120,74 @@ app.http("markAllNotificationsRead", {
   authLevel: "anonymous",
   route: "notifications/read-all",
   handler: markAllRead,
+});
+
+/** Platform admin: recent notification outbox (email + in-app delivery status). */
+async function listNotificationOutbox(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    if (!isPlatformAdmin(user) && process.env.DEV_AUTH_ENABLED !== "true") {
+      throw Errors.forbidden("Only a platform administrator may view the notification outbox.");
+    }
+    const take = Math.min(100, Math.max(1, Number(req.query.get("limit") ?? 50)));
+    const rows = await prisma.notification.findMany({
+      where: {},
+      orderBy: { scheduledFor: "desc" },
+      take,
+      include: {
+        recipient: { select: { id: true, fullName: true, email: true } },
+        actionPoint: { select: { id: true, referenceNo: true, title: true } },
+      },
+    });
+    return ok(
+      rows.map((n) => ({
+        id: n.id,
+        channel: n.channel,
+        notificationType: n.notificationType,
+        deliveryStatus: n.deliveryStatus,
+        errorMessage: n.errorMessage,
+        scheduledFor: n.scheduledFor,
+        sentAt: n.sentAt,
+        recipient: n.recipient,
+        actionPoint: n.actionPoint,
+        actionPointId: n.actionPointId,
+      })),
+    );
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+async function retryFailedNotifications(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    if (!isPlatformAdmin(user) && process.env.DEV_AUTH_ENABLED !== "true") {
+      throw Errors.forbidden("Only a platform administrator may retry notification delivery.");
+    }
+    // Reset FAILED email rows to PENDING so the dispatcher can try again
+    const reset = await prisma.notification.updateMany({
+      where: { deliveryStatus: "FAILED", channel: "EMAIL" },
+      data: { deliveryStatus: "PENDING", errorMessage: null },
+    });
+    const result = await processPendingEmailQueue(100);
+    return ok({ reset: reset.count, ...result });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+app.http("notificationOutbox", {
+  methods: ["GET", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "notifications/outbox",
+  handler: listNotificationOutbox,
+});
+
+app.http("notificationOutboxRetry", {
+  methods: ["POST", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "notifications/outbox/retry",
+  handler: retryFailedNotifications,
 });

@@ -9,7 +9,14 @@ import type { Prisma, NotificationType } from "@prisma/client";
  */
 export function buildActionNotifications(params: {
   actionPointId: number;
+  /** In-app recipients (typically all stakeholders) */
   recipientIds: number[];
+  /**
+   * Email recipients. When set, only these users get EMAIL rows.
+   * When omitted, every recipientIds user also gets EMAIL.
+   * Use for action-owner-only mail (CREATED / DAILY_REMINDER / OVERDUE).
+   */
+  emailRecipientIds?: number[];
   notificationType: NotificationType;
   scheduledFor?: Date;
   /** Optional prefix for one-off events (e.g. per-comment) so the same day can notify again */
@@ -17,6 +24,11 @@ export function buildActionNotifications(params: {
 }): Prisma.NotificationCreateManyInput[] {
   const scheduledFor = params.scheduledFor ?? new Date();
   const uniqueRecipients = Array.from(new Set(params.recipientIds));
+  const emailSet = new Set(
+    params.emailRecipientIds != null
+      ? params.emailRecipientIds
+      : uniqueRecipients,
+  );
   return uniqueRecipients.flatMap((recipientId) => {
     const dayKey = `${params.actionPointId}:${recipientId}:${params.notificationType}:${scheduledFor
       .toISOString()
@@ -24,16 +36,7 @@ export function buildActionNotifications(params: {
     const key = params.idempotencyPrefix
       ? `${params.idempotencyPrefix}:${recipientId}`
       : dayKey;
-    // Queue both EMAIL and IN_APP so portal + mail delivery workers can pick them up
-    return [
-      {
-        actionPointId: params.actionPointId,
-        recipientId,
-        channel: "EMAIL" as const,
-        notificationType: params.notificationType,
-        idempotencyKey: `email:${key}`,
-        scheduledFor,
-      },
+    const rows: Prisma.NotificationCreateManyInput[] = [
       {
         actionPointId: params.actionPointId,
         recipientId,
@@ -43,6 +46,17 @@ export function buildActionNotifications(params: {
         scheduledFor,
       },
     ];
+    if (emailSet.has(recipientId)) {
+      rows.unshift({
+        actionPointId: params.actionPointId,
+        recipientId,
+        channel: "EMAIL" as const,
+        notificationType: params.notificationType,
+        idempotencyKey: `email:${key}`,
+        scheduledFor,
+      });
+    }
+    return rows;
   });
 }
 

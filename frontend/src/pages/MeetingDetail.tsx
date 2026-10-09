@@ -241,7 +241,14 @@ export default function MeetingDetailPage() {
             ? new Date(`${postponeDate}T${postponeTime}:00`).toISOString()
             : undefined,
       });
-      flash("Meeting outcome recorded");
+      const nextHints: string[] = [];
+      if ((detail.minutes?.length ?? 0) === 0) nextHints.push("upload minutes");
+      if ((detail.actionPoints?.length ?? 0) === 0) nextHints.push("add action points");
+      flash(
+        nextHints.length
+          ? `Outcome recorded. Next: ${nextHints.join(" and ")}.`
+          : "Meeting outcome recorded.",
+      );
       setShowOutcome(false);
       await load();
     } catch (err: unknown) {
@@ -428,6 +435,78 @@ export default function MeetingDetailPage() {
               <p className="text-sm text-slate-500">This is an in-person / offline meeting only.</p>
             )}
           </Section>
+
+          {/* Post-meeting checklist */}
+          {canManage && (
+            <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">After the meeting</p>
+              <ol className="mt-3 space-y-2 text-sm">
+                <li className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                      outcome !== "SCHEDULED"
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    1
+                  </span>
+                  <span className={outcome !== "SCHEDULED" ? "text-slate-500 line-through" : "font-medium text-slate-800 dark:text-slate-100"}>
+                    Record outcome
+                  </span>
+                  {outcome === "SCHEDULED" && (
+                    <button type="button" className="btn text-xs" onClick={() => setShowOutcome(true)}>
+                      Record
+                    </button>
+                  )}
+                </li>
+                <li className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                      detail.minutes.length > 0
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    2
+                  </span>
+                  <span className={detail.minutes.length > 0 ? "text-slate-500 line-through" : "font-medium text-slate-800 dark:text-slate-100"}>
+                    Upload minutes
+                  </span>
+                  {detail.minutes.length === 0 && (
+                    <span className="text-xs text-slate-400">Use the Minutes section below</span>
+                  )}
+                </li>
+                <li className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                      detail.actionPoints.length > 0
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    3
+                  </span>
+                  <span className={detail.actionPoints.length > 0 ? "text-slate-500 line-through" : "font-medium text-slate-800 dark:text-slate-100"}>
+                    Add action points
+                  </span>
+                  {detail.actionPoints.length === 0 && (
+                    <Link
+                      to={`/committees/${detail.committeeId}`}
+                      className="text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300"
+                    >
+                      Open committee workspace
+                    </Link>
+                  )}
+                </li>
+              </ol>
+              {!live && (
+                <p className="mt-3 text-xs text-slate-500">
+                  Attendance QR is only available while the meeting is live (between start and end time).
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Outcome */}
           <Section
@@ -739,9 +818,28 @@ export default function MeetingDetailPage() {
                         {p.filename}
                       </span>
                     </div>
-                    <span className="shrink-0 text-[11px] text-slate-400">
-                      {p.sizeBytes != null ? `${Math.round(p.sizeBytes / 1024)} KB` : ""}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="text-[11px] text-slate-400">
+                        {p.sizeBytes != null ? `${Math.round(p.sizeBytes / 1024)} KB` : ""}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn text-[11px] px-2 py-1"
+                        onClick={() =>
+                          void endpoints
+                            .downloadMeetingPaper(detail.id, p.id, p.filename)
+                            .then(() => flash("Download started"))
+                            .catch((err: unknown) =>
+                              flash(
+                                err instanceof ApiClientError ? err.message : "Download failed",
+                                "error",
+                              ),
+                            )
+                        }
+                      >
+                        Download
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

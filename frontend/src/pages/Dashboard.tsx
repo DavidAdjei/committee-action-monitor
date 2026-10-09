@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -17,7 +17,6 @@ import {
 import { endpoints } from "@/api/endpoints";
 import { StatusPill, DueBadge, ProgressBar, formatDate } from "@/components/StatusBits";
 import { LoadingLogo } from "@/components/LoadingLogo";
-import { ActionDetailPanel } from "@/components/ActionDetailPanel";
 import { useAuth } from "@/state/authContext";
 import { useFlash } from "@/state/toastContext";
 import type { DashboardSummary, UrgentDashboardAction } from "@/types";
@@ -118,12 +117,12 @@ function StatCard({
 
 export default function Dashboard() {
   const { me } = useAuth();
+  const navigate = useNavigate();
   const flash = useFlash();
   const [exporting, setExporting] = useState(false);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedActionId, setSelectedActionId] = useState<number | null>(null);
   const [committeeSearch, setCommitteeSearch] = useState("");
   const [urgentFilter, setUrgentFilter] = useState<"ALL" | "OVERDUE" | "PENDING" | "CRITICAL">("ALL");
 
@@ -230,6 +229,9 @@ export default function Dashboard() {
             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin text-brand-500" : ""}`} />
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>
+          <Link to="/reports" className="btn gap-1.5 text-xs">
+            Monthly report
+          </Link>
           <Link to="/actions" className="btn-primary gap-1.5 text-xs">
             <ListChecks className="h-4 w-4" /> Global Action Register
           </Link>
@@ -513,7 +515,7 @@ export default function Dashboard() {
                 <tr key={a.id} className="transition hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <td className="py-3">
                     <button
-                      onClick={() => setSelectedActionId(a.id)}
+                      onClick={() => navigate(`/actions/${a.id}`)}
                       className="text-left font-semibold text-ink transition hover:text-brand-600 dark:text-slate-100 dark:hover:text-brand-400"
                     >
                       {a.title}
@@ -550,7 +552,7 @@ export default function Dashboard() {
                   </td>
                   <td className="py-3 text-right">
                     <button
-                      onClick={() => setSelectedActionId(a.id)}
+                      onClick={() => navigate(`/actions/${a.id}`)}
                       className="inline-flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition"
                     >
                       Inspect <ArrowUpRight className="h-3 w-3" />
@@ -571,15 +573,6 @@ export default function Dashboard() {
       </div>
 
       {/* Action Detail Slide-over / Modal */}
-      {selectedActionId && (
-        <ActionDetailPanel
-          actionId={selectedActionId}
-          onClose={() => setSelectedActionId(null)}
-          onChanged={() => {
-            loadDashboard();
-          }}
-        />
-      )}
     </div>
   );
 }

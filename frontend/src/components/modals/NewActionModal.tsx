@@ -82,18 +82,27 @@ export function NewActionModal({
         minutesReference: minutesReference || undefined,
         additionalStakeholderIds: stakeholders.map((s) => s.id),
       });
+      const n = owners.length;
       flash(
-        owners.length > 1
-          ? `Action point saved with ${owners.length} owners; stakeholders notified`
-          : "Action point saved and stakeholders notified",
+        `Action point saved. Email queued to ${n} owner${n === 1 ? "" : "s"}` +
+          ` (To: owners · Cc: secretary and Central Committee distribution list when set).` +
+          ` In-app notice also goes to other stakeholders.`,
       );
       onCreated();
       onClose();
     } catch (err: unknown) {
       if (err instanceof ApiClientError && err.isForbidden) {
-        setError("You are not authorized to create action points in this committee.");
+        setError(
+          err.message && err.message !== "Forbidden"
+            ? err.message
+            : "Only the committee Chairperson or Secretary may create action points.",
+        );
       } else {
-        setError((err as Error)?.message ?? "Could not save the action point.");
+        setError(
+          err instanceof ApiClientError
+            ? err.message
+            : (err as Error)?.message ?? "Could not save the action point.",
+        );
       }
     } finally {
       setSubmitting(false);
@@ -210,6 +219,10 @@ export function NewActionModal({
 
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
+        <p className="text-xs text-slate-500">
+          Email: <strong>To</strong> action owners · <strong>Cc</strong> committee secretary and Central Committee
+          distribution list (when set).
+        </p>
         <ModalActions>
           <button type="button" className="btn" onClick={onClose}>
             Cancel

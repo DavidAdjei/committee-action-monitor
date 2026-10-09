@@ -27,9 +27,22 @@ interface CommitteeSeed {
   meetingFrequency: string;
   mandate: string;
   members: MemberSeed[];
+  /** Optional committee distribution mailbox / DL */
+  distributionEmail?: string | null;
 }
 
 const COMMITTEES: CommitteeSeed[] = [
+  {
+    name: "Central Committee",
+    code: "CENTRAL",
+    meetingFrequency: "As scheduled",
+    mandate: "Bank-wide oversight of committee effectiveness, action monitoring and escalation.",
+    distributionEmail: null, // set when DL is confirmed e.g. CentralCommittee@myumbbank.com
+    members: [
+      { fullName: "Niine Inkumsah Sarpong", email: "Niine.InkumsahSarpong@myumbbank.com", role: "CHAIRPERSON" },
+      { fullName: "Abigail Alloye", email: "Abigail.Alloye@myumbbank.com", role: "SECRETARY" },
+    ],
+  },
   {
     name: "Asset & Liability Committee",
     code: "ALCO",
@@ -344,6 +357,7 @@ async function main() {
         chairpersonId: byEmail(chair.email).id,
         secretaryId: byEmail(sec.email).id,
         centralRepId: null,
+        distributionEmail: c.distributionEmail ?? null,
         active: true,
       },
       create: {
@@ -354,6 +368,7 @@ async function main() {
         chairpersonId: byEmail(chair.email).id,
         secretaryId: byEmail(sec.email).id,
         centralRepId: null,
+        distributionEmail: c.distributionEmail ?? null,
         active: true,
       },
     });

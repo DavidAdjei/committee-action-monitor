@@ -13,6 +13,7 @@ export interface CreateCommitteeInput {
   /** Optional — may be omitted when seeding or when not yet assigned */
   centralRepId?: number | null;
   memberIds: number[]; // ordinary members, in addition to chair/secretary
+  distributionEmail?: string | null;
   createdById: number;
 }
 
@@ -45,6 +46,7 @@ export async function createCommittee(input: CreateCommitteeInput) {
         chairpersonId: input.chairpersonId,
         secretaryId: input.secretaryId,
         centralRepId: input.centralRepId ?? null,
+        distributionEmail: input.distributionEmail?.trim() || null,
       },
     });
 
@@ -73,17 +75,26 @@ export async function createCommittee(input: CreateCommitteeInput) {
       }),
     });
 
-    // Committee-creation notifications are not tied to a single action
-    // point, so they are recorded with actionPointId left null — the
-    // in-app notification list still resolves them via recipientId.
+    // Committee-creation: actionPointId null + CREATED → email template is "added to committee"
+    // (see emailDispatchService). Email + in-app for each founding member.
+    const memberIds = Array.from(allMemberIds);
     await tx.notification.createMany({
-      data: Array.from(allMemberIds).map((recipientId) => ({
-        recipientId,
-        channel: "EMAIL" as const,
-        notificationType: "CREATED" as const,
-        idempotencyKey: `committee:${committee.id}:member:${recipientId}`,
-        scheduledFor: new Date(),
-      })),
+      data: memberIds.flatMap((recipientId) => [
+        {
+          recipientId,
+          channel: "EMAIL" as const,
+          notificationType: "CREATED" as const,
+          idempotencyKey: `committee:${committee.id}:member:${recipientId}:email`,
+          scheduledFor: new Date(),
+        },
+        {
+          recipientId,
+          channel: "IN_APP" as const,
+          notificationType: "CREATED" as const,
+          idempotencyKey: `committee:${committee.id}:member:${recipientId}:inapp`,
+          scheduledFor: new Date(),
+        },
+      ]),
       skipDuplicates: true,
     });
 
@@ -375,5 +386,36 @@ export async function setCommitteeCentralRep(input: {
     });
 
     return updated;
+  });
+}
+
+export interface UpdateCommitteeDistributionInput {
+  committeeId: number;
+  distributionEmail: string | null;
+  actorUserId: number;
+}
+
+/**
+ * Set or clear the committee distribution email.
+ * Allowed for platform admin, chairperson, or secretary of that committee.
+ */
+export async function updateCommitteeDistributionEmail(input: UpdateCommitteeDistributionInput) {
+  const committee = await prisma.committee.findUnique({ where: { id: input.committeeId } });
+  if (!committee) throw Errors.notFound("Committee");
+
+  const email = input.distributionEmail?.trim() || null;
+  if (email && !email.includes("@")) {
+    throw Errors.badRequest("distributionEmail must be a valid email address.");
+  }
+
+  return prisma.committee.update({
+    where: { id: input.committeeId },
+    data: { distributionEmail: email },
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      distributionEmail: true,
+    },
   });
 }

@@ -153,12 +153,29 @@ async function monthlyActionsReport(req: HttpRequest, _ctx: InvocationContext): 
     if (!Number.isInteger(month) || month < 1 || month > 12) {
       throw Errors.badRequest("Invalid month (1–12).");
     }
-    if (!["csv", "xlsx", "pdf"].includes(format)) {
-      throw Errors.badRequest("format must be csv, xlsx, or pdf.");
+    if (!["csv", "xlsx", "pdf", "json"].includes(format)) {
+      throw Errors.badRequest("format must be csv, xlsx, pdf, or json.");
     }
 
     const report = await buildMonthlyActionReport(year, month);
     const base = `cam-monthly-actions-${year}-${String(month).padStart(2, "0")}`;
+
+    if (format === "json") {
+      return ok({
+        year: report.year,
+        month: report.month,
+        monthLabel: report.monthLabel,
+        total: report.total,
+        completed: report.completed,
+        open: report.open,
+        inProgress: report.inProgress,
+        overdue: report.overdue,
+        completionRate: report.completionRate,
+        avgProgress: report.avgProgress,
+        byCommittee: report.byCommittee,
+        byStatus: report.byStatus,
+      });
+    }
 
     if (format === "csv") {
       const csv = reportToCsv(report);

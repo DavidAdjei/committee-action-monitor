@@ -28,6 +28,7 @@ async function listAllActions(req: HttpRequest, _ctx: InvocationContext): Promis
     const status = req.query.get("status");
     const search = req.query.get("q");
     const committeeIdRaw = req.query.get("committeeId");
+    const scope = (req.query.get("scope") ?? "").toLowerCase(); // mine | all
     const page = Number(req.query.get("page") ?? "1");
     const pageSize = Math.min(Number(req.query.get("pageSize") ?? "25"), 100);
 
@@ -36,23 +37,35 @@ async function listAllActions(req: HttpRequest, _ctx: InvocationContext): Promis
 
     const where: Record<string, unknown> = {
       status: status && status !== "All" ? (UI_STATUS_MAP[status] as string) : undefined,
-      ...(search
-        ? { OR: [{ title: { contains: search } }, { referenceNo: { contains: search } }] }
-        : {}),
     };
 
-    if (canViewBankWide(user)) {
-      if (committeeId) where.committeeId = committeeId;
-    } else {
-      // Personal worklist: actions assigned to this user as owner
-      where.OR = [
+    const searchClause = search
+      ? { OR: [{ title: { contains: search } }, { referenceNo: { contains: search } }] }
+      : null;
+
+    const ownerClause = {
+      OR: [
         { ownerId: user.id },
         {
           stakeholders: {
             some: { userId: user.id, stakeholderType: "ACTION_OWNER" },
           },
         },
-      ];
+      ],
+    };
+
+    if (canViewBankWide(user) && scope !== "mine") {
+      // Bank-wide (or filtered by committee)
+      if (committeeId) where.committeeId = committeeId;
+      if (searchClause) Object.assign(where, searchClause);
+    } else {
+      // Mine: actions assigned to this user as owner
+      if (committeeId) where.committeeId = committeeId;
+      if (searchClause) {
+        where.AND = [ownerClause, searchClause];
+      } else {
+        Object.assign(where, ownerClause);
+      }
     }
 
     const [total, actions] = await Promise.all([

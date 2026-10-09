@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { FileUp, Plus, Upload, UserMinus, UserPlus, X } from "lucide-react";
 import { Modal, ModalActions } from "@/components/Modal";
 import { endpoints } from "@/api/endpoints";
+import { useFlash } from "@/state/toastContext";
 import { ApiClientError } from "@/api/client";
 import { extractTextFromFile, parseDocxImport } from "@/lib/docxText";
 import {
@@ -27,6 +28,7 @@ export function ImportDocumentModal({
   onClose: () => void;
   onImported: () => void;
 }) {
+  const flash = useFlash();
   const [step, setStep] = useState<Step>("choose");
   const [mode, setMode] = useState<Mode>("minutes_document");
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -36,6 +38,7 @@ export function ImportDocumentModal({
   // Minutes document upload
   const [minutesKind, setMinutesKind] = useState<MinutesKind>("DRAFT");
   const [minutesFile, setMinutesFile] = useState<File | null>(null);
+  const [notifyMinutesIssued, setNotifyMinutesIssued] = useState(true);
 
   // Actions-only parse flow
   const [fileName, setFileName] = useState<string | null>(null);
@@ -213,7 +216,14 @@ export function ImportDocumentModal({
     setBusy(true);
     setError(null);
     try {
-      await endpoints.uploadMinutesDocument(Number(meetingId), minutesFile, minutesKind);
+      await endpoints.uploadMinutesDocument(Number(meetingId), minutesFile, minutesKind, {
+        notifyMinutesIssued,
+      });
+      flash(
+        notifyMinutesIssued
+          ? `${minutesKind === "FINAL" ? "Final" : "Draft"} minutes uploaded — committee will be notified by email`
+          : `${minutesKind === "FINAL" ? "Final" : "Draft"} minutes uploaded (no email sent)`,
+      );
       onImported();
     } catch (err: unknown) {
       setError(
@@ -409,6 +419,22 @@ export function ImportDocumentModal({
                     disabled={!meetingId}
                     onChange={(e) => setMinutesFile(e.target.files?.[0] ?? null)}
                   />
+                </label>
+                <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm dark:border-slate-600 dark:bg-slate-900/40">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={notifyMinutesIssued}
+                    onChange={(e) => setNotifyMinutesIssued(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium text-slate-800 dark:text-slate-100">
+                      Email committee when minutes are issued
+                    </span>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      Sends a “minutes issued” notice to committee members (draft or final). Uncheck to upload silently.
+                    </span>
+                  </span>
                 </label>
               </>
             )}

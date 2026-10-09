@@ -79,7 +79,7 @@ export async function requireCommitteeOfficer(user: User, committeeId: number): 
   if (isPlatformAdmin(user)) return;
   const authorized = await isCommitteeOfficer(user.id, committeeId);
   if (!authorized) {
-    throw Errors.forbidden("Only the committee's active Chairperson or Secretary may do this.");
+    throw Errors.forbidden("Only this committee's active Chairperson or Secretary may perform this action.");
   }
 }
 
@@ -95,7 +95,7 @@ export async function canViewCommittee(user: User, committeeId: number): Promise
 
 export async function requireViewCommittee(user: User, committeeId: number): Promise<void> {
   const allowed = await canViewCommittee(user, committeeId);
-  if (!allowed) throw Errors.forbidden("You do not have access to this committee.");
+  if (!allowed) throw Errors.forbidden("You do not have access to this committee. Ask a Central Committee administrator or the committee secretary to add you as a member.");
 }
 
 /**
@@ -123,7 +123,7 @@ export async function requireViewAction(
 ): Promise<void> {
   const allowed = await canViewAction(user, action);
   if (!allowed) {
-    throw Errors.forbidden("You do not have access to this action point.");
+    throw Errors.forbidden("You do not have access to this action point. Only committee members, action owners, and Central Committee (view) can open it.");
   }
 }
 
@@ -143,7 +143,7 @@ export async function requireCentralAdministrator(user: User): Promise<void> {
 /** Platform-only operations (directory sync, system tools). */
 export async function requirePlatformAdmin(user: User): Promise<void> {
   if (!isPlatformAdmin(user)) {
-    throw Errors.forbidden("Only a platform administrator may do this.");
+    throw Errors.forbidden("Only a platform administrator may perform this system action.");
   }
 }
 
@@ -157,6 +157,6 @@ export async function requireAdmin(user: User): Promise<void> {
 
 export async function requireCentralCommittee(user: User): Promise<void> {
   if (!isCentralMember(user) && !isPlatformAdmin(user)) {
-    throw Errors.forbidden("Only Central Committee members may do this.");
+    throw Errors.forbidden("Only Central Committee members (or a platform administrator) may perform this action.");
   }
 }

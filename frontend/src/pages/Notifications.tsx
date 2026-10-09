@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bell, CheckCheck, Filter } from "lucide-react";
 import { endpoints } from "@/api/endpoints";
-import { ActionDetailPanel } from "@/components/ActionDetailPanel";
 import { LoadingLogo } from "@/components/LoadingLogo";
 import { useFlash } from "@/state/toastContext";
+import { useAuth } from "@/state/authContext";
 import type { NotificationItem } from "@/types";
+import { useNavigate } from "react-router-dom";
 
 const TYPE_LABELS: Record<string, string> = {
   CREATED: "New action point assigned",
@@ -34,8 +35,24 @@ function deliveryBadge(status: string) {
 
 export default function Notifications() {
   const flash = useFlash();
+  const navigate = useNavigate();
+  const { me } = useAuth();
+  const isPlatformAdmin = Boolean(me?.isAdmin);
   const [items, setItems] = useState<NotificationItem[]>([]);
-  const [openActionId, setOpenActionId] = useState<number | null>(null);
+  const [outbox, setOutbox] = useState<
+    {
+      id: number;
+      channel: string;
+      notificationType: string;
+      deliveryStatus: string;
+      errorMessage: string | null;
+      scheduledFor: string;
+      sentAt: string | null;
+      recipient: { id: number; fullName: string; email: string };
+      actionPoint: { id: number; referenceNo: string; title: string } | null;
+    }[]
+  >([]);
+  const [outboxBusy, setOutboxBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"ALL" | "UNREAD" | "FAILED">("ALL");
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
@@ -52,9 +69,20 @@ export default function Notifications() {
     }
   };
 
+  const loadOutbox = async () => {
+    if (!isPlatformAdmin) return;
+    try {
+      const rows = await endpoints.notificationOutbox(50);
+      setOutbox(rows);
+    } catch {
+      // non-admin or endpoint unavailable
+    }
+  };
+
   useEffect(() => {
     load();
-  }, []);
+    void loadOutbox();
+  }, [isPlatformAdmin]);
 
   const filtered = useMemo(() => {
     return items.filter((n) => {
@@ -89,7 +117,7 @@ export default function Notifications() {
         );
       }
       if (n.action) {
-        setOpenActionId(n.action.id);
+        navigate(`/actions/${n.action.id}`);
       } else {
         flash("No linked action for this notification");
       }
@@ -128,9 +156,8 @@ export default function Notifications() {
               key={f}
               type="button"
               onClick={() => setFilter(f)}
-              className={`rounded-full px-3 py-1 text-xs font-medium ${
-                filter === f ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800/50"
-              }`}
+              className={`rounded-full px-3 py-1 text-xs font-medium ${filter === f ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800/50"
+                }`}
             >
               {f === "ALL" ? "All" : f === "UNREAD" ? "Unread" : "Failed delivery"}
             </button>
@@ -153,7 +180,10 @@ export default function Notifications() {
       {filtered.length === 0 ? (
         <div className="card text-center">
           <Bell className="mx-auto mb-2 h-12 w-12 text-slate-300" />
-          <p className="text-slate-400">No notifications match this filter.</p>
+          <p className="font-semibold text-slate-700 dark:text-slate-200">No notifications</p>
+          <p className="mt-1 max-w-sm text-sm text-slate-500">
+            Updates on actions, meetings, and minutes will appear here.
+          </p>
         </div>
       ) : (
         <div className="card divide-y divide-slate-100 dark:divide-slate-700 overflow-hidden p-0 dark:divide-slate-800">
@@ -162,9 +192,8 @@ export default function Notifications() {
               key={n.id}
               type="button"
               onClick={() => openItem(n)}
-              className={`flex w-full items-start gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 ${
-                !n.readAt ? "bg-brand-50/40 dark:bg-brand-950/20" : ""
-              }`}
+              className={`flex w-full items-start gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 ${!n.readAt ? "bg-brand-50/40 dark:bg-brand-950/20" : ""
+                }`}
             >
               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-600 dark:bg-brand-950 dark:text-brand-300">
                 <Bell className="h-4 w-4" />
@@ -205,8 +234,87 @@ export default function Notifications() {
         </div>
       )}
 
-      {openActionId && (
-        <ActionDetailPanel actionId={openActionId} onClose={() => setOpenActionId(null)} onChanged={load} />
+
+      {isPlatformAdmin && (
+        <div className="card overflow-hidden p-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3 dark:border-slate-800">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">Notification outbox (admin)</h2>
+              <p className="text-xs text-slate-500">Last 50 system notifications · EMAIL / IN_APP delivery status</p>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" className="btn text-xs" onClick={() => void loadOutbox()}>
+                Refresh
+              </button>
+              <button
+                type="button"
+                className="btn-primary text-xs"
+                disabled={outboxBusy}
+                onClick={() => {
+                  void (async () => {
+                    setOutboxBusy(true);
+                    try {
+                      const r = await endpoints.retryNotificationOutbox();
+                      flash(`Retry: reset ${r.reset}, sent ${r.sent}, failed ${r.failed}`);
+                      await loadOutbox();
+                    } catch (err: unknown) {
+                      flash("Retry failed", "error");
+                    } finally {
+                      setOutboxBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {outboxBusy ? "Retrying…" : "Retry failed emails"}
+              </button>
+            </div>
+          </div>
+          {outbox.length === 0 ? (
+            <p className="px-5 py-6 text-sm text-slate-500">No outbox rows yet.</p>
+          ) : (
+            <div className="max-h-80 overflow-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900">
+                  <tr className="border-b border-slate-100 text-[10px] uppercase text-slate-400 dark:border-slate-800">
+                    <th className="px-3 py-2">When</th>
+                    <th className="px-3 py-2">Type</th>
+                    <th className="px-3 py-2">Channel</th>
+                    <th className="px-3 py-2">To</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {outbox.map((n) => (
+                    <tr key={n.id} className="border-b border-slate-50 dark:border-slate-800/80">
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-500">
+                        {new Date(n.scheduledFor).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-2 font-medium">{n.notificationType}</td>
+                      <td className="px-3 py-2">{n.channel}</td>
+                      <td className="max-w-[10rem] truncate px-3 py-2" title={n.recipient.email}>
+                        {n.recipient.fullName}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={`rounded-full px-2 py-0.5 font-medium ${deliveryBadge(n.deliveryStatus)}`}>
+                          {n.deliveryStatus}
+                        </span>
+                        {n.errorMessage && (
+                          <span className="mt-0.5 block max-w-[12rem] truncate text-red-600" title={n.errorMessage}>
+                            {n.errorMessage}
+                          </span>
+                        )}
+                      </td>
+                      <td className="max-w-[8rem] truncate px-3 py-2 text-slate-500">
+                        {n.actionPoint ? n.actionPoint.referenceNo : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

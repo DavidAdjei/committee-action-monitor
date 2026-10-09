@@ -13,7 +13,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "ts-node prisma/seed.ts",
-    "test": "echo \"no tests configured\" && exit 0"
+    "test": "ts-node --transpile-only src/test/runUnitTests.ts"
   },
   "dependencies": {
     "@azure/functions": "^4.5.1",

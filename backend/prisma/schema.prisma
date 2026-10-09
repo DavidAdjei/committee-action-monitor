@@ -77,6 +77,8 @@ model Committee {
   secretaryId      Int      @map("secretary_id")
   /// Optional at DB level (e.g. seed without a rep). App may still collect it on create.
   centralRepId     Int?     @map("central_rep_id")
+  /// Optional shared mailbox / DL for the committee (e.g. ALCO@bank.com)
+  distributionEmail String?  @map("distribution_email") @db.VarChar(190)
   active           Boolean  @default(true)
   createdAt        DateTime @default(now()) @map("created_at")
 
