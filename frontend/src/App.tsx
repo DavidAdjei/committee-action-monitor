@@ -5,7 +5,7 @@ import {
 } from "@azure/msal-react";
 import { useAuth } from "@/state/authContext";
 import { Layout } from "@/components/Layout";
-import DevSignIn from "@/pages/DevSignIn";
+import SignIn from "@/pages/SignIn";
 import Dashboard from "@/pages/Dashboard";
 import Committees from "@/pages/Committees";
 import CommitteeWorkspace from "@/pages/CommitteeWorkspace";
@@ -22,23 +22,29 @@ import { homePathFor } from "@/lib/homePath";
 /**
  * Route guard:
  * - Entra: AuthenticatedTemplate / UnauthenticatedTemplate (MSAL session)
- * - Dev: local me + x-dev-user-id
+ * - Bearer JWT from MSAL (Entra) only
  */
 function ProfileLoadFailed() {
-  const { signOut } = useAuth();
+  const { signOut, authError, refresh } = useAuth();
+  const detail =
+    authError ??
+    "Signed in with Microsoft, but your account is not set up in Committee Action Monitor.";
   return (
     <div className="grid min-h-screen place-items-center bg-slate-50 p-6 dark:bg-slate-950">
       <div className="max-w-md rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-          Signed in with Microsoft, but your account is not set up in Committee Action Monitor.
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Cannot open your workspace</p>
+        <p className="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-300">{detail}</p>
+        <p className="mt-3 text-xs text-slate-500">
+          If this continues, contact Cyber & Information Security with your work email address.
         </p>
-        <p className="mt-2 text-xs text-slate-500">
-          Ask an administrator to sync the directory or enable ENTRA_AUTO_PROVISION on the API. Your Entra
-          user must exist (or be creatable) in the local user table.
-        </p>
-        <button type="button" className="btn-primary mt-4" onClick={() => void signOut()}>
-          Sign out
-        </button>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <button type="button" className="btn" onClick={() => void refresh()}>
+            Try again
+          </button>
+          <button type="button" className="btn-primary" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -87,7 +93,7 @@ function SignInRoute() {
           )}
         </AuthenticatedTemplate>
         <UnauthenticatedTemplate>
-          <DevSignIn />
+          <SignIn />
         </UnauthenticatedTemplate>
       </>
     );
@@ -97,7 +103,7 @@ function SignInRoute() {
     return <LoadingLogo scope="fullscreen" message="Loading…" />;
   }
   if (me) return <Navigate to={homePathFor(me)} replace />;
-  return <DevSignIn />;
+  return <SignIn />;
 }
 
 function HomeRedirect() {

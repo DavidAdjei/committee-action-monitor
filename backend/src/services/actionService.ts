@@ -240,7 +240,7 @@ export async function recordActionUpdate(input: RecordActionUpdateInput) {
           mediaType: f.mediaType,
           sizeBytes: f.sizeBytes,
           uploadedById: input.authorId,
-          scanResult: process.env.DEV_AUTH_ENABLED === "true" ? "CLEAN" : "PENDING",
+          scanResult: "PENDING",
         })),
       });
     }
@@ -327,7 +327,7 @@ export async function verifyActionEvidence(params: {
       throw Errors.conflict("Cannot approve while evidence failed malware scanning.");
     }
     const allowPending =
-      process.env.DEV_AUTH_ENABLED === "true" && process.env.EVIDENCE_ALLOW_PENDING_DOWNLOAD === "true";
+      process.env.EVIDENCE_ALLOW_PENDING_DOWNLOAD === "true";
     if (
       files.length > 0 &&
       files.some((f) => f.scanResult !== "CLEAN") &&

@@ -220,8 +220,17 @@ const COMMITTEES: CommitteeSeed[] = [
   },
 ];
 
-const EXTRA_USERS: { fullName: string; email: string }[] = [
-  { fullName: "David Adjei", email: "david.adjei@myumbbank.com" },
+const EXTRA_USERS: { fullName: string; email: string; entraObjectId?: string }[] = [
+  {
+    fullName: "David Adjei",
+    email: "david.adjei@myumbbank.com",
+    entraObjectId: "b3a7c49f-71b2-4c25-997a-283fb9213c58",
+  },
+  {
+    fullName: "David Nii Yartey Tawiah",
+    email: "david.yartey@myumbbank.com",
+    entraObjectId: "793d514c-9641-4e15-89b4-4c2f95ffc283",
+  },
   { fullName: "HENRIETTA DUHO", email: "Henrietta.Duho@myumbbank.com" },
   { fullName: "RITA ODJIDJA", email: "Rita.Odjidja@myumbbank.com" },
   { fullName: "Selasi Afi Manyo", email: "Selasi.Manyo@myumbbank.com" },
@@ -250,17 +259,20 @@ type UserSeed = {
   isCentralCommittee: boolean;
   isAdmin: boolean;
   centralRole: "MEMBER" | "ADMINISTRATOR" | null;
+  entraObjectId?: string | null;
 };
 
 /** Central Committee Administrator sub-role (Stephen). */
 const CENTRAL_ADMIN_EMAIL = "stephen.ampadu@myumbbank.com";
 
-/** Platform admins who are not Central Committee members (e.g. David Adjei). */
-const PLATFORM_ADMIN_EMAILS = new Set(["david.adjei@myumbbank.com"].map((e) => e.toLowerCase()));
+/** Platform admins who are not Central Committee members. */
+const PLATFORM_ADMIN_EMAILS = new Set(
+  ["david.adjei@myumbbank.com", "david.yartey@myumbbank.com"].map((e) => e.toLowerCase()),
+);
 
 function collectUsers(): Map<string, UserSeed> {
   const map = new Map<string, UserSeed>();
-  const put = (fullName: string, email: string) => {
+  const put = (fullName: string, email: string, entraObjectId?: string) => {
     const key = email.toLowerCase();
     if (!map.has(key)) {
       map.set(key, {
@@ -269,15 +281,18 @@ function collectUsers(): Map<string, UserSeed> {
         isCentralCommittee: false,
         isAdmin: false,
         centralRole: null,
+        entraObjectId: entraObjectId ?? null,
       });
     } else {
-      map.get(key)!.fullName = fullName;
+      const existing = map.get(key)!;
+      existing.fullName = fullName;
+      if (entraObjectId) existing.entraObjectId = entraObjectId;
     }
   };
   for (const c of COMMITTEES) {
     for (const m of c.members) put(m.fullName, m.email);
   }
-  for (const u of EXTRA_USERS) put(u.fullName, u.email);
+  for (const u of EXTRA_USERS) put(u.fullName, u.email, u.entraObjectId);
 
   // Central Committee: secretariat MEMBERs; one ADMINISTRATOR for CC leadership tools.
   for (const [key, u] of map) {
@@ -318,6 +333,7 @@ async function main() {
       create: {
         fullName: u.fullName,
         email: u.email,
+        entraObjectId: u.entraObjectId ?? undefined,
         isCentralCommittee: u.isCentralCommittee,
         isAdmin: u.isAdmin,
         centralRole: u.centralRole,
@@ -325,6 +341,7 @@ async function main() {
       },
       update: {
         fullName: u.fullName,
+        ...(u.entraObjectId ? { entraObjectId: u.entraObjectId } : {}),
         isCentralCommittee: u.isCentralCommittee,
         isAdmin: u.isAdmin,
         centralRole: u.centralRole,

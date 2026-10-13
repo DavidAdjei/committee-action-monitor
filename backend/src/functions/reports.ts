@@ -10,6 +10,7 @@ import {
   reportToPdf,
 } from "../services/monthlyActionReport";
 import { prisma } from "../lib/prisma";
+import { escapeCsvCell } from "../lib/csvEscape";
 
 async function dashboard(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
@@ -81,11 +82,7 @@ async function actionsExport(req: HttpRequest, _ctx: InvocationContext): Promise
       take: 5000,
     });
 
-    const esc = (v: string | number | null | undefined) => {
-      const s = v == null ? "" : String(v);
-      if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-      return s;
-    };
+    const esc = escapeCsvCell;
 
     const header =
       "referenceNo,title,committee,committeeCode,owner,status,priority,progress,deadline,dateRaised,revisedDeadline";

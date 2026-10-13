@@ -127,7 +127,7 @@ async function listNotificationOutbox(req: HttpRequest, _ctx: InvocationContext)
   if (req.method === "OPTIONS") return preflight();
   try {
     const user = await requireUser(req);
-    if (!isPlatformAdmin(user) && process.env.DEV_AUTH_ENABLED !== "true") {
+    if (!isPlatformAdmin(user)) {
       throw Errors.forbidden("Only a platform administrator may view the notification outbox.");
     }
     const take = Math.min(100, Math.max(1, Number(req.query.get("limit") ?? 50)));
@@ -163,7 +163,7 @@ async function retryFailedNotifications(req: HttpRequest, _ctx: InvocationContex
   if (req.method === "OPTIONS") return preflight();
   try {
     const user = await requireUser(req);
-    if (!isPlatformAdmin(user) && process.env.DEV_AUTH_ENABLED !== "true") {
+    if (!isPlatformAdmin(user)) {
       throw Errors.forbidden("Only a platform administrator may retry notification delivery.");
     }
     // Reset FAILED email rows to PENDING so the dispatcher can try again

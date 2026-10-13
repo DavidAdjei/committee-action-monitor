@@ -3,14 +3,11 @@ import { MsalProvider } from "@azure/msal-react";
 import type { PublicClientApplication, AuthenticationResult } from "@azure/msal-browser";
 import { getMsalInstance, isEntraConfigured } from "@/auth/msalConfig";
 import { setAccessToken } from "@/auth/token";
-import { setDevUserId } from "@/api/client";
 import { AuthProvider } from "@/state/authContext";
 import { LoadingLogo } from "@/components/LoadingLogo";
 
 /**
- * When Entra is configured, wraps the tree in MsalProvider so
- * AuthenticatedTemplate / UnauthenticatedTemplate / useMsal work.
- * Processes the redirect response once during bootstrap.
+ * Requires Entra (MSAL) configuration. Production auth is Bearer JWT only.
  */
 export function MsalAppProviders({ children }: { children: ReactNode }) {
   const entra = isEntraConfigured();
@@ -32,7 +29,6 @@ export function MsalAppProviders({ children }: { children: ReactNode }) {
         if (result?.account) {
           msal.setActiveAccount(result.account);
           if (result.accessToken) setAccessToken(result.accessToken);
-          setDevUserId(null);
         } else {
           const accounts = msal.getAllAccounts();
           if (accounts[0]) msal.setActiveAccount(accounts[0]);
@@ -51,7 +47,19 @@ export function MsalAppProviders({ children }: { children: ReactNode }) {
   }, [entra]);
 
   if (!entra) {
-    return <AuthProvider mode="dev">{children}</AuthProvider>;
+    return (
+      <div className="grid min-h-screen place-items-center bg-slate-950 p-6 text-center">
+        <div className="max-w-md space-y-3">
+          <p className="text-lg font-semibold text-white">Microsoft sign-in is required</p>
+          <p className="text-sm text-slate-400">
+            Set <code className="text-brand-300">VITE_PUBLIC_AZURE_CLIENT_ID</code>,{" "}
+            <code className="text-brand-300">VITE_PUBLIC_AZURE_TENANT_ID</code>, and{" "}
+            <code className="text-brand-300">VITE_PUBLIC_AZURE_API_SCOPE</code> (or equivalent
+            VITE_ENTRA_* variables) for this SPA. Demo / header-based sign-in has been removed.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   if (bootError) {
@@ -71,7 +79,7 @@ export function MsalAppProviders({ children }: { children: ReactNode }) {
 
   return (
     <MsalProvider instance={instance}>
-      <AuthProvider mode="entra">{children}</AuthProvider>
+      <AuthProvider>{children}</AuthProvider>
     </MsalProvider>
   );
 }

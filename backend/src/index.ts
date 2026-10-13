@@ -1,5 +1,4 @@
 import "./functions/me";
-import "./functions/devAuth";
 import "./functions/committees";
 import "./functions/committeeDetail";
 import "./functions/meetings";

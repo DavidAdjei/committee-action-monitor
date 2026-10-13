@@ -1,11 +1,11 @@
 import { HttpResponseInit } from "@azure/functions";
 
-const CORS_ORIGIN = process.env.CORS_ALLOWED_ORIGIN ?? "*";
+const CORS_ORIGIN = process.env.CORS_ALLOWED_ORIGIN ?? "http://localhost:5173";
 
 export function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": CORS_ORIGIN,
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-dev-user-id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     Vary: "Origin",
   };

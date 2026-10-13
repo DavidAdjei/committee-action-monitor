@@ -3,6 +3,7 @@ import { Errors } from "../lib/http";
 import { storeEvidenceFile, readEvidenceFile } from "./storageService";
 import { auditRow } from "./auditService";
 import { sendGraphMail, isMailSendConfigured } from "./emailDispatchService";
+import { escapeHtml, wrapCamEmail, emailDetailTable, emailSignatureText } from "../lib/emailLayout";
 import { triggerEmailDispatchAsync } from "./notificationService";
 
 export async function addMeetingPaper(params: {
@@ -149,30 +150,40 @@ export async function emailMeetingInvitation(meetingId: number): Promise<{
     : null;
   const subject = `[CAM] Meeting invitation: ${meeting.reference} — ${meeting.title}`;
   const teamsBlock = meeting.teamsJoinUrl
-    ? `<p style="margin:16px 0"><a href="${escape(meeting.teamsJoinUrl)}" style="display:inline-block;background:#5b21b6;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600">Join Microsoft Teams meeting</a></p>
-       <p style="font-size:12px;color:#64748b;word-break:break-all">${escape(meeting.teamsJoinUrl)}</p>`
-    : `<p style="color:#64748b">No Teams join link is attached to this meeting.</p>`;
+    ? `<div style="margin:20px 0;padding:16px;background:#f5f3ff;border-radius:10px;border:1px solid #ddd6fe;">
+         <p style="margin:0 0 10px 0;font-size:13px;color:#5b21b6;font-weight:600;">Microsoft Teams</p>
+         <a href="${escape(meeting.teamsJoinUrl)}" style="display:inline-block;background:#5b21b6;color:#fff;padding:11px 18px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">Join Teams meeting</a>
+         <p style="margin:10px 0 0 0;font-size:11px;color:#64748b;word-break:break-all;">${escape(meeting.teamsJoinUrl)}</p>
+       </div>`
+    : `<p style="margin:16px 0;color:#64748b;font-size:13px;">No Teams join link is attached to this meeting.</p>`;
 
   const papersBlock = attachments.length
-    ? `<p><b>${attachments.length}</b> meeting paper(s) attached to this email.</p>
-       <ul>${attachments.map((a) => `<li>${escape(a.filename)}</li>`).join("")}</ul>`
-    : `<p style="color:#64748b">No meeting papers were attached.</p>`;
+    ? `<p style="margin:12px 0 4px 0;"><b>${attachments.length}</b> meeting paper(s) attached to this email.</p>
+       <ul style="margin:0;padding-left:18px;color:#334155;">${attachments.map((a) => `<li style="margin:4px 0;">${escape(a.filename)}</li>`).join("")}</ul>`
+    : `<p style="margin:12px 0;color:#64748b;font-size:13px;">No meeting papers were attached.</p>`;
 
-  const html = `
-<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a;line-height:1.5">
-  <p>You are invited to a committee meeting of <b>${escape(meeting.committee.name)}</b> (${escape(meeting.committee.code)}).</p>
-  <table style="border-collapse:collapse;margin:12px 0">
-    <tr><td style="padding:4px 16px 4px 0;color:#64748b">Reference</td><td><b>${escape(meeting.reference)}</b></td></tr>
-    <tr><td style="padding:4px 16px 4px 0;color:#64748b">Title</td><td>${escape(meeting.title)}</td></tr>
-    <tr><td style="padding:4px 16px 4px 0;color:#64748b">When</td><td>${escape(when)} UTC${end ? ` – ${escape(end)} UTC` : ""}</td></tr>
-    ${meeting.venue ? `<tr><td style="padding:4px 16px 4px 0;color:#64748b">Venue</td><td>${escape(meeting.venue)}</td></tr>` : ""}
-  </table>
-  ${teamsBlock}
-  ${meeting.agenda ? `<p><b>Agenda</b></p><pre style="white-space:pre-wrap;font-family:inherit;background:#f8fafc;padding:12px;border-radius:8px">${escape(meeting.agenda)}</pre>` : ""}
-  ${papersBlock}
-  <p style="color:#94a3b8;font-size:12px;margin-top:24px">Committee Action Monitor · Scheduled by ${escape(meeting.createdBy.fullName)}</p>
-</div>
-`.trim();
+  const bodyHtml = `
+    <p style="margin:0 0 14px 0;color:#334155;">You are invited to a committee meeting of <b>${escape(meeting.committee.name)}</b> (${escape(meeting.committee.code)}).</p>
+    ${emailDetailTable([
+      { label: "Reference", value: `<b>${escape(meeting.reference)}</b>` },
+      { label: "Title", value: escape(meeting.title) },
+      { label: "When", value: `${escape(when)} UTC${end ? ` – ${escape(end)} UTC` : ""}` },
+      ...(meeting.venue ? [{ label: "Venue", value: escape(meeting.venue) }] : []),
+      { label: "Scheduled by", value: escape(meeting.createdBy.fullName) },
+    ])}
+    ${teamsBlock}
+    ${meeting.agenda ? `<div style="margin:16px 0;"><p style="margin:0 0 6px 0;font-weight:700;font-size:13px;color:#0f172a;">Agenda</p><pre style="margin:0;white-space:pre-wrap;font-family:Segoe UI,Arial,sans-serif;background:#f8fafc;padding:14px;border-radius:8px;border:1px solid #e2e8f0;font-size:13px;color:#334155;">${escape(meeting.agenda)}</pre></div>` : ""}
+    ${papersBlock}
+  `;
+
+  const html = wrapCamEmail({
+    eyebrow: "Meeting invitation",
+    title: meeting.title,
+    bodyHtml,
+    cta: meeting.teamsJoinUrl
+      ? { label: "Join Microsoft Teams meeting", url: meeting.teamsJoinUrl }
+      : undefined,
+  });
 
   const text = [
     `Meeting: ${meeting.title} (${meeting.reference})`,
@@ -180,11 +191,12 @@ export async function emailMeetingInvitation(meetingId: number): Promise<{
     `When: ${when} UTC`,
     meeting.venue ? `Venue: ${meeting.venue}` : "",
     meeting.teamsJoinUrl ? `Teams: ${meeting.teamsJoinUrl}` : "",
+    emailSignatureText(),
   ]
     .filter(Boolean)
     .join("\n");
 
-  if (!isMailSendConfigured() && process.env.MAIL_DEV_LOG !== "true" && process.env.DEV_AUTH_ENABLED !== "true") {
+  if (!isMailSendConfigured() && process.env.MAIL_DEV_LOG !== "true") {
     console.warn(`[mail] Meeting ${meetingId}: mail not configured; invitation not sent to ${toList.length} recipients`);
     return { sent: 0, failed: toList.length, recipientCount: toList.length };
   }
@@ -212,10 +224,4 @@ export async function emailMeetingInvitation(meetingId: number): Promise<{
   }
 }
 
-function escape(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+const escape = escapeHtml;

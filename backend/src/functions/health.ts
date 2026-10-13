@@ -12,14 +12,14 @@ async function healthLive(req: HttpRequest, _ctx: InvocationContext): Promise<Ht
 }
 
 /**
- * Ops metrics for platform admins (or DEV_AUTH).
+ * Ops metrics for platform admins only.
  * Combines in-process counters (since last restart) with durable FAILED outbox counts.
  */
 async function healthMetrics(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
   try {
     const user = await requireUser(req);
-    if (!isPlatformAdmin(user) && process.env.DEV_AUTH_ENABLED !== "true") {
+    if (!isPlatformAdmin(user)) {
       throw Errors.forbidden("Only a platform administrator may view ops metrics.");
     }
 

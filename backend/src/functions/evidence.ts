@@ -77,7 +77,7 @@ async function downloadEvidence(req: HttpRequest, _ctx: InvocationContext): Prom
     // Evidence must pass malware scanning before download (docs §9).
     // PENDING is allowed only when explicitly enabled for local/dev demos.
     const allowPending =
-      process.env.DEV_AUTH_ENABLED === "true" && process.env.EVIDENCE_ALLOW_PENDING_DOWNLOAD === "true";
+      process.env.EVIDENCE_ALLOW_PENDING_DOWNLOAD === "true";
     if (evidence.scanResult === "INFECTED") {
       throw Errors.forbidden("This file failed malware scanning and cannot be downloaded.");
     }

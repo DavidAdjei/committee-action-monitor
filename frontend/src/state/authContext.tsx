@@ -15,18 +15,19 @@ import {
   type IPublicClientApplication,
 } from "@azure/msal-browser";
 import { endpoints } from "@/api/endpoints";
-import { getDevUserId, setDevUserId } from "@/api/client";
+import { ApiClientError } from "@/api/client";
 import { getAccessToken, setAccessToken } from "@/auth/token";
-import { getLoginRequest, getTokenRequest, isEntraConfigured } from "@/auth/msalConfig";
+import { getLoginRequest, getTokenRequest } from "@/auth/msalConfig";
 import type { Me } from "@/types";
 
 type AuthContextValue = {
   me: Me | null;
   loading: boolean;
   entraEnabled: boolean;
-  devAuthEnabled: boolean;
+  /** Last profile/session error message for the UI (identity conflict, not provisioned, etc.). */
+  authError: string | null;
+  clearAuthError: () => void;
   signInWithMicrosoft: () => Promise<void>;
-  signInDev: (userId: number) => Promise<void>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -53,139 +54,61 @@ async function acquireTokenForAccount(
   }
 }
 
-/** Dev-only auth (no MsalProvider). */
-function DevAuthProvider({ children }: { children: ReactNode }) {
-  const [me, setMe] = useState<Me | null>(null);
-  const [loading, setLoading] = useState(true);
-  const entraEnabled = false;
-  const devAuthEnabled = import.meta.env.VITE_DEV_AUTH !== "false";
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      if (!getDevUserId()) {
-        setMe(null);
-        return;
-      }
-      setMe(await endpoints.me());
-    } catch {
-      setMe(null);
-      setDevUserId(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const value = useMemo<AuthContextValue>(
-    () => ({
-      me,
-      loading,
-      entraEnabled,
-      devAuthEnabled,
-      signInWithMicrosoft: async () => {
-        throw new Error(
-          "Entra is not configured. Set VITE_PUBLIC_AZURE_CLIENT_ID, TENANT_ID, and SCOPE.",
-        );
-      },
-      signInDev: async (userId: number) => {
-        setAccessToken(null);
-        setDevUserId(userId);
-        setLoading(true);
-        try {
-          setMe(await endpoints.me());
-        } catch {
-          setMe(null);
-          setDevUserId(null);
-        } finally {
-          setLoading(false);
-        }
-      },
-      signOut: async () => {
-        setMe(null);
-        setAccessToken(null);
-        setDevUserId(null);
-      },
-      refresh,
-    }),
-    [me, loading, entraEnabled, devAuthEnabled, refresh],
-  );
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+function messageFromErr(err: unknown): string {
+  if (err instanceof ApiClientError) return err.message;
+  if (err instanceof Error && err.message) return err.message;
+  return "Could not load your Committee Action Monitor profile.";
 }
 
-/** Entra auth — must render under MsalProvider. */
 function EntraAuthProvider({ children }: { children: ReactNode }) {
   const { instance, accounts, inProgress } = useMsal();
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
-  const entraEnabled = true;
-  const devAuthEnabled = import.meta.env.VITE_DEV_AUTH !== "false";
-
-  // Stable id only — AccountInfo object identity changes every render and caused /me loops
-  const account = instance.getActiveAccount() ?? accounts[0] ?? null;
-  const accountId = account?.homeAccountId ?? null;
-
-  // Prevent overlapping /me calls and repeat fetches for the same account
-  const inFlight = useRef(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const loadedAccountId = useRef<string | null>(null);
+  const accountId = accounts[0]?.homeAccountId ?? null;
 
   const loadSession = useCallback(
-    async (force = false) => {
+    async (force: boolean) => {
       if (inProgress !== "none") return;
-      if (inFlight.current) return;
-
-      const currentAccount =
-        instance.getActiveAccount() ?? instance.getAllAccounts()[0] ?? null;
-      const id = currentAccount?.homeAccountId ?? null;
-
-      // Already attempted this Entra account (success or failure) unless force
-      if (!force && id && loadedAccountId.current === id) {
-        setLoading(false);
-        return;
-      }
-
-      // No Entra session and no dev user
-      if (!id && !getDevUserId()) {
+      const account = instance.getActiveAccount() ?? accounts[0] ?? null;
+      if (!account) {
         setMe(null);
+        setAccessToken(null);
         loadedAccountId.current = null;
         setLoading(false);
         return;
       }
-
-      inFlight.current = true;
+      if (!force && loadedAccountId.current === account.homeAccountId && me) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
-        if (currentAccount) {
-          instance.setActiveAccount(currentAccount);
-          const token = await acquireTokenForAccount(instance, currentAccount);
-          if (token) setAccessToken(token);
-        }
-
-        if (!getAccessToken() && !getDevUserId()) {
-          setMe(null);
-          loadedAccountId.current = null;
+        const token = await acquireTokenForAccount(instance, account);
+        if (!token) {
+          if (!getAccessToken()) {
+            setMe(null);
+            setLoading(false);
+          }
           return;
         }
-
-        const profile = await endpoints.me();
-        setMe(profile);
-        loadedAccountId.current = id;
+        setAccessToken(token);
+        instance.setActiveAccount(account);
+        setMe(await endpoints.me());
+        setAuthError(null);
+        loadedAccountId.current = account.homeAccountId;
       } catch (err) {
-        console.error("Session refresh failed", err);
+        console.error("Session load failed", err);
         setMe(null);
-        // Mark this account as attempted so we don't hammer /me on failure
-        loadedAccountId.current = id;
-        if (!getAccessToken()) setDevUserId(null);
+        setAuthError(messageFromErr(err));
+        // Keep access token so the user can still sign out cleanly; clear identity binding only.
+        loadedAccountId.current = null;
       } finally {
-        inFlight.current = false;
         setLoading(false);
       }
     },
-    [instance, inProgress],
+    [instance, accounts, inProgress, me],
   );
 
   useEffect(() => {
@@ -199,46 +122,31 @@ function EntraAuthProvider({ children }: { children: ReactNode }) {
   }, [loadSession]);
 
   const signInWithMicrosoft = useCallback(async () => {
-    setDevUserId(null);
     setAccessToken(null);
+    setAuthError(null);
     loadedAccountId.current = null;
     await instance.loginRedirect(getLoginRequest());
   }, [instance]);
 
-  const signInDev = useCallback(async (userId: number) => {
-    setAccessToken(null);
-    setDevUserId(userId);
-    loadedAccountId.current = null;
-    setLoading(true);
-    try {
-      setMe(await endpoints.me());
-    } catch {
-      setMe(null);
-      setDevUserId(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const signOut = useCallback(async () => {
     setMe(null);
     setAccessToken(null);
-    setDevUserId(null);
+    setAuthError(null);
     loadedAccountId.current = null;
-    // App-only logout: clear this SPA's MSAL token cache only.
-    // Does not call Entra's end-session endpoint, so Teams/Outlook SSO stays intact.
     instance.setActiveAccount(null);
     await instance.clearCache();
   }, [instance]);
+
+  const clearAuthError = useCallback(() => setAuthError(null), []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       me,
       loading: loading || inProgress !== "none",
-      entraEnabled,
-      devAuthEnabled,
+      entraEnabled: true,
+      authError,
+      clearAuthError,
       signInWithMicrosoft,
-      signInDev,
       signOut,
       refresh,
     }),
@@ -246,10 +154,9 @@ function EntraAuthProvider({ children }: { children: ReactNode }) {
       me,
       loading,
       inProgress,
-      entraEnabled,
-      devAuthEnabled,
+      authError,
+      clearAuthError,
       signInWithMicrosoft,
-      signInDev,
       signOut,
       refresh,
     ],
@@ -258,18 +165,8 @@ function EntraAuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-export function AuthProvider({
-  children,
-  mode,
-}: {
-  children: ReactNode;
-  mode?: "entra" | "dev";
-}) {
-  const resolved = mode ?? (isEntraConfigured() ? "entra" : "dev");
-  if (resolved === "entra") {
-    return <EntraAuthProvider>{children}</EntraAuthProvider>;
-  }
-  return <DevAuthProvider>{children}</DevAuthProvider>;
+export function AuthProvider({ children }: { children: ReactNode }) {
+  return <EntraAuthProvider>{children}</EntraAuthProvider>;
 }
 
 export function useAuth(): AuthContextValue {

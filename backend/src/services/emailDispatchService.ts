@@ -13,6 +13,12 @@ import { prisma } from "../lib/prisma";
 import { groupEmailRows } from "../lib/notificationGrouping";
 import { recordMailBatchFailed, recordMailBatchSent } from "../lib/opsMetrics";
 import { graphEnv, graphFetch, isGraphAppConfigured } from "../lib/graphClient";
+import {
+  escapeHtml,
+  wrapCamEmail,
+  emailDetailTable,
+  emailSignatureText,
+} from "../lib/emailLayout";
 import type { OutboundNotification } from "./notificationService";
 
 export type MailAttachment = {
@@ -46,14 +52,6 @@ const TYPE_SUBJECT: Record<string, string> = {
 function subjectFor(type: string, reference?: string | null): string {
   const base = TYPE_SUBJECT[type] ?? `CAM notification (${type})`;
   return reference ? `[CAM] ${base}: ${reference}` : `[CAM] ${base}`;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 export async function buildEmailContent(n: {
@@ -176,35 +174,43 @@ export async function buildEmailContent(n: {
     lines.push(`Open CAM: ${portal}`);
   }
 
-  lines.push("");
-  lines.push("— Committee Action Monitor");
-  lines.push("This is an automated message. Please do not reply to this email.");
+  lines.push(emailSignatureText());
 
   const text = lines.join("\n");
-  const html = `
-<!DOCTYPE html>
-<html><body style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a;line-height:1.5">
-  <p>Hello ${escapeHtml(recipient.fullName)},</p>
-  <p>${escapeHtml(lines[2] || "")}</p>
-  ${
-    action
-      ? `<table style="border-collapse:collapse;margin:16px 0">
-    <tr><td style="padding:4px 12px 4px 0;color:#64748b">Reference</td><td><b>${escapeHtml(action.referenceNo)}</b></td></tr>
-    <tr><td style="padding:4px 12px 4px 0;color:#64748b">Title</td><td>${escapeHtml(action.title)}</td></tr>
-    <tr><td style="padding:4px 12px 4px 0;color:#64748b">Committee</td><td>${escapeHtml(action.committee.name)}</td></tr>
-    <tr><td style="padding:4px 12px 4px 0;color:#64748b">Owner</td><td>${escapeHtml(action.owner.fullName)}</td></tr>
-    <tr><td style="padding:4px 12px 4px 0;color:#64748b">Status</td><td>${escapeHtml(action.status)} · ${action.progress}%</td></tr>
-    ${
-      action.deadline
-        ? `<tr><td style="padding:4px 12px 4px 0;color:#64748b">Deadline</td><td>${action.deadline.toISOString().slice(0, 10)}</td></tr>`
-        : ""
-    }
-  </table>
-  <p><a href="${escapeHtml(actionLink)}" style="color:#1d4ed8">Open action in CAM</a></p>`
-      : `<p><a href="${escapeHtml(portal)}" style="color:#1d4ed8">Open CAM</a></p>`
-  }
-  <p style="color:#94a3b8;font-size:12px;margin-top:24px">Committee Action Monitor · Automated notification</p>
-</body></html>`.trim();
+  const messageLead = lines[2] || "You have a new notification in Committee Action Monitor.";
+  const detailRows = action
+    ? [
+        { label: "Reference", value: `<b>${escapeHtml(action.referenceNo)}</b>` },
+        { label: "Title", value: escapeHtml(action.title) },
+        {
+          label: "Committee",
+          value: `${escapeHtml(action.committee.name)} (${escapeHtml(action.committee.code)})`,
+        },
+        { label: "Owner", value: escapeHtml(action.owner.fullName) },
+        {
+          label: "Status",
+          value: `${escapeHtml(action.status)} · ${action.progress}%`,
+        },
+        ...(action.deadline
+          ? [{ label: "Deadline", value: action.deadline.toISOString().slice(0, 10) }]
+          : []),
+      ]
+    : [];
+
+  const bodyHtml = `
+    <p style="margin:0 0 12px 0;">Hello <b>${escapeHtml(recipient.fullName)}</b>,</p>
+    <p style="margin:0 0 16px 0;color:#334155;">${escapeHtml(messageLead)}</p>
+    ${action ? emailDetailTable(detailRows) : ""}
+  `;
+
+  const html = wrapCamEmail({
+    eyebrow: "Notification",
+    title: subject.replace(/^\[CAM\]\s*/, ""),
+    bodyHtml,
+    cta: action
+      ? { label: "Open action in CAM", url: actionLink }
+      : { label: "Open Committee Action Monitor", url: portal },
+  });
 
   return {
     toEmail: recipient.email,
@@ -407,7 +413,7 @@ export async function deliverNotification(n: {
   const content = await buildEmailContent(n);
 
   if (!isMailSendConfigured()) {
-    if (process.env.MAIL_DEV_LOG === "true" || process.env.DEV_AUTH_ENABLED === "true") {
+    if (process.env.MAIL_DEV_LOG === "true") {
       console.info(
         `[mail:dev] To=${content.toEmail} Subject=${content.subject}\n${content.text.slice(0, 500)}`,
       );
@@ -492,49 +498,54 @@ async function buildCreatedDigestContent(params: {
     lines.push(`  Open: ${portal}/actions/${a.id}`);
     lines.push("");
   }
-  lines.push("— Committee Action Monitor");
-  lines.push("This is an automated message. Please do not reply to this email.");
+  lines.push(emailSignatureText());
 
   const text = lines.join("\n");
   const listHtml = actions
     .map(
       (a) => `
     <tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0"><b>${escapeHtml(a.referenceNo)}</b></td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0">${escapeHtml(a.title)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0">${a.deadline.toISOString().slice(0, 10)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0"><a href="${portal}/actions/${a.id}">Open</a></td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;"><b style="color:#5b21b6;">${escapeHtml(a.referenceNo)}</b></td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#0f172a;">${escapeHtml(a.title)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;color:#64748b;white-space:nowrap;">${a.deadline.toISOString().slice(0, 10)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;"><a href="${portal}/actions/${a.id}" style="color:#5b21b6;font-weight:600;text-decoration:none;">Open</a></td>
     </tr>`,
     )
     .join("");
 
-  const html = `
-<!DOCTYPE html>
-<html><body style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#0f172a;line-height:1.5">
-  <p>Hello ${escapeHtml(recipient.fullName)},</p>
-  <p>${
+  const lead =
     count === 1
       ? "A new action point has been assigned to you."
-      : escapeHtml(
-          `${count} new action points have been assigned to you` +
-            (meeting ? ` from meeting ${meeting.reference}` : "") +
-            ".",
-        )
-  }</p>
-  <p style="color:#64748b">Committee: <b>${escapeHtml(committee.name)}</b> (${escapeHtml(committee.code)})</p>
-  <table style="border-collapse:collapse;width:100%;margin:16px 0;font-size:13px">
-    <thead>
-      <tr style="background:#f8fafc;text-align:left">
-        <th style="padding:8px 12px">Reference</th>
-        <th style="padding:8px 12px">Title</th>
-        <th style="padding:8px 12px">Deadline</th>
-        <th style="padding:8px 12px"></th>
-      </tr>
-    </thead>
-    <tbody>${listHtml}</tbody>
-  </table>
-  <p style="color:#94a3b8;font-size:12px;margin-top:24px">Committee Action Monitor · Automated notification</p>
-</body></html>`.trim();
+      : `${count} new action points have been assigned to you` +
+        (meeting ? ` from meeting <b>${escapeHtml(meeting.reference)}</b>` : "") +
+        ".";
+
+  const bodyHtml = `
+    <p style="margin:0 0 12px 0;">Hello <b>${escapeHtml(recipient.fullName)}</b>,</p>
+    <p style="margin:0 0 8px 0;color:#334155;">${lead}</p>
+    <p style="margin:0 0 16px 0;color:#64748b;font-size:13px;">Committee: <b style="color:#0f172a;">${escapeHtml(committee.name)}</b> (${escapeHtml(committee.code)})</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+      <thead>
+        <tr style="background:#f8fafc;text-align:left;">
+          <th style="padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:#64748b;">Reference</th>
+          <th style="padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:#64748b;">Title</th>
+          <th style="padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:#64748b;">Deadline</th>
+          <th style="padding:10px 12px;font-size:11px;"></th>
+        </tr>
+      </thead>
+      <tbody>${listHtml}</tbody>
+    </table>
+  `;
+
+  const html = wrapCamEmail({
+    eyebrow: "Action assignment",
+    title: count === 1 ? "New action point assigned" : `${count} action points assigned`,
+    bodyHtml,
+    cta:
+      count === 1
+        ? { label: "Open action in CAM", url: `${portal}/actions/${actions[0].id}` }
+        : { label: "Open Committee Action Monitor", url: portal },
+  });
 
   return {
     toEmail: recipient.email,
@@ -663,7 +674,7 @@ export async function processPendingEmailQueue(limit = 500): Promise<{
         html = content.html;
         text = content.text;
         if (toRecipients.length > 1) {
-          html = html.replace(/Hello\s+[^,<]+,/, "Hello,");
+          html = html.replace(/Hello\s+(?:<b>)?[^,<]+(?:<\/b>)?,/, "Hello,");
           text = text.replace(/^Hello [^\n]+,/m, "Hello,");
         }
       }
@@ -676,7 +687,7 @@ export async function processPendingEmailQueue(limit = 500): Promise<{
       );
 
       if (!isMailSendConfigured()) {
-        if (process.env.MAIL_DEV_LOG === "true" || process.env.DEV_AUTH_ENABLED === "true") {
+        if (process.env.MAIL_DEV_LOG === "true") {
           console.info(
             `[mail:dev] BATCH key=${groupKey} To=${toRecipients.map((r) => r.email).join(", ")} ` +
               `Cc=${cc.map((c) => c.email).join(", ") || "(none)"} Subject=${subject}`,

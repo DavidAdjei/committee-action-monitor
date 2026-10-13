@@ -21,13 +21,13 @@ app.timer("notificationDispatchTimer", {
 
 /**
  * Manual flush for ops / local testing: POST /api/notifications/dispatch
- * Admin only when not in DEV_AUTH mode.
+ * Platform admin only.
  */
 async function dispatchNowHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
   try {
     const user = await requireUser(req);
-    if (!user.isAdmin && process.env.DEV_AUTH_ENABLED !== "true") {
+    if (!user.isAdmin) {
       return errorResponse(new Error("Only administrators may trigger notification dispatch."));
     }
     const result = await processPendingEmailQueue(200);

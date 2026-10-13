@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { ActionStatus } from "@prisma/client";
+import { escapeCsvCell, neutralizeSpreadsheetFormula } from "../lib/csvEscape";
 
 export type MonthlyActionRow = {
   referenceNo: string;
@@ -156,11 +157,7 @@ export async function buildMonthlyActionReport(
 }
 
 export function reportToCsv(report: MonthlyActionReport): string {
-  const esc = (v: string | number) => {
-    const s = String(v ?? "");
-    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
+  const esc = escapeCsvCell;
   const lines: string[] = [];
   lines.push(`Monthly Action Points Report,${esc(report.monthLabel)}`);
   lines.push(`Period,${report.periodStart},${report.periodEnd}`);
@@ -207,12 +204,14 @@ export function reportToCsv(report: MonthlyActionReport): string {
 /** Excel-compatible SpreadsheetML (.xls). */
 export function reportToSpreadsheetMl(report: MonthlyActionReport): string {
   const cell = (v: string | number) => {
-    const s = String(v)
+    if (typeof v === "number") {
+      return `<Cell><Data ss:Type="Number">${v}</Data></Cell>`;
+    }
+    const s = neutralizeSpreadsheetFormula(String(v))
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
-    const type = typeof v === "number" ? "Number" : "String";
-    return `<Cell><Data ss:Type="${type}">${s}</Data></Cell>`;
+    return `<Cell><Data ss:Type="String">${s}</Data></Cell>`;
   };
   const row = (cells: (string | number)[]) =>
     `<Row>${cells.map(cell).join("")}</Row>`;

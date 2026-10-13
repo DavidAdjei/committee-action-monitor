@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Bell, CheckCheck, Filter } from "lucide-react";
 import { endpoints } from "@/api/endpoints";
 import { LoadingLogo } from "@/components/LoadingLogo";
 import { useFlash } from "@/state/toastContext";
 import { useAuth } from "@/state/authContext";
 import type { NotificationItem } from "@/types";
-import { useNavigate } from "react-router-dom";
 
 const TYPE_LABELS: Record<string, string> = {
   CREATED: "New action point assigned",
@@ -156,8 +156,9 @@ export default function Notifications() {
               key={f}
               type="button"
               onClick={() => setFilter(f)}
-              className={`rounded-full px-3 py-1 text-xs font-medium ${filter === f ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800/50"
-                }`}
+              className={`rounded-full px-3 py-1 text-xs font-medium ${
+                filter === f ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800/50"
+              }`}
             >
               {f === "ALL" ? "All" : f === "UNREAD" ? "Unread" : "Failed delivery"}
             </button>
@@ -192,8 +193,9 @@ export default function Notifications() {
               key={n.id}
               type="button"
               onClick={() => openItem(n)}
-              className={`flex w-full items-start gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 ${!n.readAt ? "bg-brand-50/40 dark:bg-brand-950/20" : ""
-                }`}
+              className={`flex w-full items-start gap-3 px-5 py-3.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 ${
+                !n.readAt ? "bg-brand-50/40 dark:bg-brand-950/20" : ""
+              }`}
             >
               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-600 dark:bg-brand-950 dark:text-brand-300">
                 <Bell className="h-4 w-4" />

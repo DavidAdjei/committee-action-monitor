@@ -5,20 +5,21 @@
     "FUNCTIONS_WORKER_RUNTIME": "node",
     "DATABASE_URL": "mysql://cam_app:changeme@localhost:3306/committee_actions",
     "CORS_ALLOWED_ORIGIN": "http://localhost:5173",
-    "DEV_AUTH_ENABLED": "true",
+    "APP_PUBLIC_URL": "http://localhost:5173",
+    "ENTRA_TENANT_ID": "",
+    "ENTRA_API_AUDIENCE": "",
+    "ENTRA_AUTO_PROVISION": "false",
     "ENTRA_GRAPH_TENANT_ID": "",
     "ENTRA_GRAPH_CLIENT_ID": "",
     "ENTRA_GRAPH_CLIENT_SECRET": "",
     "ENTRA_GRAPH_MAIL_SENDER": "",
     "ENTRA_GRAPH_DELEGATED_SCOPES": "https://graph.microsoft.com/OnlineMeetings.ReadWrite offline_access",
-    "APP_PUBLIC_URL": "http://localhost:5173",
-    "MAIL_DEV_LOG": "true",
+    "MAIL_DEV_LOG": "false",
     "EMAIL_CC_CENTRAL_COMMITTEE": "false",
-    "EVIDENCE_STORAGE_CONNECTION_STRING": "",
-    "EVIDENCE_STORAGE_CONTAINER": "evidence"
+    "EVIDENCE_ALLOW_PENDING_DOWNLOAD": "false"
   },
   "Host": {
-    "CORS": "*",
+    "CORS": "http://localhost:5173",
     "CORSCredentials": false
   }
 }

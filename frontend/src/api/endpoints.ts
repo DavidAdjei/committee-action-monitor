@@ -15,22 +15,6 @@ import type {
 
 export const endpoints = {
   me: () => api.get<Me>("/me"),
-  devUsers: () =>
-    api.get<
-      {
-        id: number;
-        fullName: string;
-        email: string;
-        department: string | null;
-        isCentralCommittee: boolean;
-        isAdmin: boolean;
-        memberships?: {
-          committeeId: number;
-          role: "CHAIRPERSON" | "SECRETARY" | "MEMBER";
-          committee?: { id: number; name: string; code: string };
-        }[];
-      }[]
-    >("/dev/users"),
 
   directory: (q: string, limit?: number) => api.get<DirectoryUser[]>(`/directory?q=${encodeURIComponent(q)}${limit != null ? `&limit=${limit}` : ""}`),
   syncDirectory: () =>
