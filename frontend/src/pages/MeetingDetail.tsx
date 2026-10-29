@@ -70,7 +70,7 @@ interface MeetingDetailData {
     id: number;
     referenceNo: string;
     title: string;
-    status: string;
+    status: import("@/types").ActionStatus;
     progress: number;
     owner: { id: number; fullName: string };
   }[];
@@ -641,8 +641,8 @@ export default function MeetingDetailPage() {
                       </p>
                     </div>
                     <div className="flex gap-2">
-                      {m.hasFile !== false && (
-                        <PreviewMinutesButton minutesId={m.id} filename={m.filename} hasFile={m.hasFile !== false} />
+                      {m.hasFile && (
+                        <PreviewMinutesButton minutesId={m.id} filename={m.filename} mediaType={m.mediaType} hasFile />
                       )}
                       <button
                         type="button"

@@ -30,7 +30,7 @@ export function SetChairModal({
       const excludeId = currentChairperson?.id;
       setCandidates(excludeId ? users.filter((u) => u.id !== excludeId) : users);
     });
-  }, [query, currentChairperson.id]);
+  }, [query, currentChairperson?.id]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();

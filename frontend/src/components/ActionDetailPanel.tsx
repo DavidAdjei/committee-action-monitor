@@ -86,7 +86,7 @@ export function ActionDetailPanel({
     if (!detail || !commentBody.trim()) return;
     setCommentBusy(true);
     try {
-      await endpoints.postActionComment(actionId, commentBody.trim());
+      await endpoints.addActionComment(actionId, commentBody.trim());
       flash("Comment posted — secretary and owners notified by email");
       setCommentBody("");
       load();
@@ -265,11 +265,9 @@ export function ActionDetailPanel({
   };
 
   const submissionUpdate =
-    detail.updates.find(
-      (u) =>
-        u.status === "PENDING_VERIFICATION" ||
-        (detail.status === "PENDING_VERIFICATION" && u.status === detail.status),
-    ) ?? detail.updates[0];
+    detail.updates.find((u) => u.status === "PENDING_VERIFICATION") ??
+    (detail.status === "PENDING_VERIFICATION" ? detail.updates[0] : undefined) ??
+    detail.updates[0];
   const pendingFiles = submissionUpdate?.evidenceFiles ?? [];
 
   const owners = detail.stakeholders.filter((s) => s.stakeholderType === "ACTION_OWNER");
@@ -799,8 +797,8 @@ export function ActionDetailPanel({
                             </span>
                             <span className="text-slate-400">{formatDate(ev.occurredAt)}</span>
                           </div>
-                          {ev.actor && (
-                            <p className="mt-0.5 text-slate-500">{ev.actor.fullName}</p>
+                          {ev.actorFullName && (
+                            <p className="mt-0.5 text-slate-500">{ev.actorFullName}</p>
                           )}
                           {ev.after != null && (
                             <pre className="mt-1 overflow-x-auto rounded bg-white p-1.5 text-[10px] text-slate-600 dark:bg-slate-900 dark:text-slate-300">

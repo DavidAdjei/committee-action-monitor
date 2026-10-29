@@ -4,7 +4,7 @@ import {
   StorageUnavailableError,
 } from "../services/storageService";
 
-const CORS_ORIGIN = process.env.CORS_ALLOWED_ORIGIN ?? "*";
+const CORS_ORIGIN = process.env.CORS_ALLOWED_ORIGIN || "http://localhost:5173";
 
 export function corsHeaders(): Record<string, string> {
   return {

@@ -1,4 +1,7 @@
 import { api } from "./client";
+import { useLoadingStore } from "@/state/loadingStore";
+import { getAccessToken } from "@/auth/token";
+import { ApiClientError } from "./client";
 import type {
   Me,
   DirectoryUser,
@@ -12,6 +15,29 @@ import type {
   AuditEvent,
   MeetingMinutes,
 } from "@/types";
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const bearer = getAccessToken();
+  return {
+    ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+    ...extra,
+  };
+}
+
+async function parseError(res: Response): Promise<ApiClientError> {
+  const isJson = res.headers.get("content-type")?.includes("application/json");
+  const body = isJson ? await res.json().catch(() => undefined) : undefined;
+  const err = body?.error ?? { code: "UNKNOWN", message: res.statusText };
+  let message = err.message ?? res.statusText;
+  if (res.status === 403 && !err.message) {
+    message = "You are not authorized to perform this operation.";
+  }
+  if (res.status === 409 && !err.message) {
+    message =
+      "This record was changed by someone else. Refresh and try again with the latest version.";
+  }
+  return new ApiClientError(res.status, err.code ?? "UNKNOWN", message);
+}
 
 export const endpoints = {
   me: () => api.get<Me>("/me"),
@@ -122,15 +148,32 @@ export const endpoints = {
     if (graphToken) {
       headers["X-Graph-Access-Token"] = graphToken;
     }
-    return api.post<
-      Meeting & {
+    // Fix: Use fetch directly with proper headers since API client methods don't support custom headers
+    useLoadingStore.getState().startRequest();
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? "/api"}/committees/${committeeId}/meetings`, {
+        method: "POST",
+        headers: {
+          ...authHeaders(),
+          ...headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        throw await parseError(res);
+      }
+      const body = await res.json();
+      return body as Meeting & {
         teamsProvisioned?: boolean;
         teamsOrganizer?: string | null;
         teamsEventId?: string | null;
         teamsJoinUrl?: string | null;
         teamsAuthMode?: "delegated" | "application" | null;
-      }
-    >(`/committees/${committeeId}/meetings`, data, { headers });
+      };
+    } finally {
+      useLoadingStore.getState().stopRequest();
+    }
   },
 
   uploadMeetingPaper: (meetingId: number, file: File) => {
@@ -274,7 +317,7 @@ export const endpoints = {
     );
   },
   downloadEvidence: (evidenceId: number, filename?: string) =>
-    api.download(`/evidence/${evidenceId}/download`, filename),
+    api.download(`/evidence/${evidenceId}/download`, filename ?? `evidence-${evidenceId}`),
   /**
    * Verify (approve/return) a pending action. Pass `version` for optimistic concurrency.
    */

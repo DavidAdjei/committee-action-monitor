@@ -9,6 +9,7 @@
     "clean": "rimraf dist",
     "prestart": "npm run build",
     "start": "func start",
+    "generate": "npx prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",

@@ -70,10 +70,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) =>
+  post: <T>(path: string, body?: unknown, init?: { headers?: Record<string, string> }) =>
     request<T>(path, {
       method: "POST",
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers: init?.headers,
     }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, {
@@ -98,29 +99,46 @@ export const api = {
       const res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
       if (!res.ok) throw await parseError(res);
       const blob = await res.blob();
-      if (/^(text\/html|application\/xhtml\+xml)(;|$)/i.test(blob.type)) {
-        throw new ApiClientError(415, "UNSAFE_DOWNLOAD", "Unexpected HTML download response.");
-      }
       const url = URL.createObjectURL(blob);
-      try {
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = safeDownloadFilename(filename);
-        document.body.appendChild(a);
-        try { a.click(); } finally { a.remove(); }
-      } finally {
-        URL.revokeObjectURL(url);
-      }
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = safeDownloadFilename(filename);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     } finally {
       useLoadingStore.getState().stopRequest();
     }
   },
-  fetchBlob: async (path: string): Promise<Blob> => {
+  /**
+   * Fetch a binary file for in-app preview.
+   * Returns the blob plus content-type / filename from response headers when present.
+   */
+  fetchBlob: async (
+    path: string,
+  ): Promise<{ blob: Blob; contentType: string | null; filename: string | null }> => {
     useLoadingStore.getState().startRequest();
     try {
       const res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
       if (!res.ok) throw await parseError(res);
-      return await res.blob();
+      const blob = await res.blob();
+      const contentType = res.headers.get("content-type");
+      const cd = res.headers.get("content-disposition");
+      let filename: string | null = null;
+      if (cd) {
+        const utf = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+        const plain = /filename="?([^";]+)"?/i.exec(cd);
+        const raw = utf?.[1] ?? plain?.[1];
+        if (raw) {
+          try {
+            filename = decodeURIComponent(raw.trim());
+          } catch {
+            filename = raw.trim();
+          }
+        }
+      }
+      return { blob, contentType, filename };
     } finally {
       useLoadingStore.getState().stopRequest();
     }
