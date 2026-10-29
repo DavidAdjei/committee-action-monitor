@@ -33,6 +33,7 @@ import {
   isCommitteeOfficer,
 } from "@/lib/permissions";
 import type { ActionDetail, AuditEvent } from "@/types";
+import { safeHttpUrl } from "@/lib/safeUrl";
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return "0 B";
@@ -487,11 +488,11 @@ export function ActionDetailPanel({
                           <span className="text-slate-400">({formatBytes(f.sizeBytes)})</span>
                         </button>
                       ))}
-                      {submissionUpdate.evidenceLink && (
+                      {safeHttpUrl(submissionUpdate.evidenceLink) && (
                         <a
-                          href={submissionUpdate.evidenceLink}
+                          href={safeHttpUrl(submissionUpdate.evidenceLink)!}
                           target="_blank"
-                          rel="noreferrer"
+                          rel="noopener noreferrer"
                           className="btn text-xs"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
@@ -594,11 +595,11 @@ export function ActionDetailPanel({
                                 {f.filename}
                               </button>
                             ))}
-                            {u.evidenceLink && (
+                            {safeHttpUrl(u.evidenceLink) && (
                               <a
-                                href={u.evidenceLink}
+                                href={safeHttpUrl(u.evidenceLink)!}
                                 target="_blank"
-                                rel="noreferrer"
+                                rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-xs font-medium text-brand-700 ring-1 ring-brand-200 dark:bg-slate-900 dark:text-brand-300 dark:ring-brand-900"
                               >
                                 <ExternalLink className="h-3 w-3" />

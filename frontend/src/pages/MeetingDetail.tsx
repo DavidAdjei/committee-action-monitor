@@ -24,6 +24,7 @@ import { useAuth } from "@/state/authContext";
 import { canCreateMeeting } from "@/lib/permissions";
 import { PreviewMinutesButton } from "@/components/MinutesDocumentPreview";
 import { AttendanceQrProjector } from "@/components/AttendanceQrProjector";
+import { safeHttpUrl } from "@/lib/safeUrl";
 
 interface MeetingDetailData {
   id: number;
@@ -230,7 +231,7 @@ export default function MeetingDetailPage() {
   };
 
   const submitOutcome = async () => {
-    if (!outcomeReason.trim()) return;
+    if (outcomeType !== "HELD" && !outcomeReason.trim()) return;
     setBusy(true);
     try {
       await endpoints.recordMeetingOutcome(detail.id, {
@@ -340,11 +341,11 @@ export default function MeetingDetailPage() {
             </div>
 
             <div className="flex flex-shrink-0 flex-wrap gap-2">
-              {detail.teamsJoinUrl && (
+              {safeHttpUrl(detail.teamsJoinUrl) && (
                 <a
-                  href={detail.teamsJoinUrl}
+                  href={safeHttpUrl(detail.teamsJoinUrl)!}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100"
                 >
                   <Video className="h-4 w-4 text-brand-700" />
@@ -412,16 +413,16 @@ export default function MeetingDetailPage() {
 
           {/* Teams */}
           <Section icon={<Video className="h-4 w-4" />} title="Microsoft Teams">
-            {detail.teamsJoinUrl ? (
+            {safeHttpUrl(detail.teamsJoinUrl) ? (
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                   <p className="text-sm text-slate-600 dark:text-slate-300">Online meeting is ready.</p>
-                  <p className="mt-1 truncate font-mono text-xs text-slate-400">{detail.teamsJoinUrl}</p>
+                  <p className="mt-1 truncate font-mono text-xs text-slate-400">{safeHttpUrl(detail.teamsJoinUrl)}</p>
                 </div>
                 <a
-                  href={detail.teamsJoinUrl}
+                  href={safeHttpUrl(detail.teamsJoinUrl)!}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="btn-primary inline-flex shrink-0 items-center gap-2"
                 >
                   <Video className="h-4 w-4" /> Open Teams
@@ -567,15 +568,18 @@ export default function MeetingDetailPage() {
                     </button>
                   ))}
                 </div>
-                <label className="field-label">
-                  Reason
-                  <textarea
-                    className="field-input min-h-[72px]"
-                    value={outcomeReason}
-                    onChange={(e) => setOutcomeReason(e.target.value)}
-                    placeholder="Why the meeting did not proceed or was postponed"
-                  />
-                </label>
+                {outcomeType !== "HELD" && (
+                  <label className="field-label">
+                    Reason
+                    <textarea
+                      required
+                      className="field-input min-h-[72px]"
+                      value={outcomeReason}
+                      onChange={(e) => setOutcomeReason(e.target.value)}
+                      placeholder="Why the meeting did not proceed or was postponed"
+                    />
+                  </label>
+                )}
                 {outcomeType === "POSTPONED" && (
                   <div className="grid grid-cols-2 gap-2">
                     <label className="field-label">

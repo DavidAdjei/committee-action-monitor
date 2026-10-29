@@ -28,7 +28,6 @@ export function NewActionModal({
   const [description, setDescription] = useState("");
   const [owners, setOwners] = useState<DirectoryUser[]>([]);
   const [deadline, setDeadline] = useState("");
-  const [minutesReference, setMinutesReference] = useState("");
   const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH" | "CRITICAL">("MEDIUM");
   const [stakeholders, setStakeholders] = useState<DirectoryUser[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -79,7 +78,6 @@ export function NewActionModal({
         ownerIds: ids,
         deadline,
         priority,
-        minutesReference: minutesReference || undefined,
         additionalStakeholderIds: stakeholders.map((s) => s.id),
       });
       const n = owners.length;
@@ -192,16 +190,6 @@ export function NewActionModal({
           </small>
         </label>
 
-        <label className="field-label">
-          Minutes paragraph / reference
-          <input
-            required
-            className="field-input"
-            placeholder="e.g. Item 5.2"
-            value={minutesReference}
-            onChange={(e) => setMinutesReference(e.target.value)}
-          />
-        </label>
 
         <MultiStakeholderPicker
           label="Additional stakeholders"
@@ -213,8 +201,7 @@ export function NewActionModal({
 
         <div className="flex items-center gap-2 rounded-lg bg-blue-50 p-3 text-xs text-blue-800 dark:bg-blue-950 dark:text-blue-200">
           <ListChecks className="h-4 w-4 shrink-0" />
-          The meeting reference, meeting date and minutes item will be retained with this action throughout its
-          lifecycle.
+          The linked meeting and deadline are retained with this action throughout its lifecycle.
         </div>
 
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}

@@ -50,7 +50,15 @@ export function MinutesDocumentPreview({
 
     void endpoints
       .fetchMinutesDocumentBlob(minutesId)
-      .then(({ blob, contentType, filename: name }) => {
+      .then(async ({ blob, contentType, filename: name }) => {
+        if (cancelled) return;
+        const isPdfCandidate = isPdf(name || filename || null, contentType || mediaType || blob.type);
+        if (isPdfCandidate) {
+          const signature = new Uint8Array(await blob.slice(0, 5).arrayBuffer());
+          if (String.fromCharCode(...signature) !== "%PDF-") {
+            throw new Error("Document is not a valid PDF.");
+          }
+        }
         if (cancelled) return;
         const url = URL.createObjectURL(blob);
         revoked = url;
@@ -95,7 +103,8 @@ export function MinutesDocumentPreview({
           <div className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
             <iframe
               title={resolvedName ?? "Minutes PDF"}
-              src={objectUrl}
+              sandbox=""
+              src={objectUrl && objectUrl.startsWith("blob:") ? objectUrl : undefined}
               className="h-[min(70vh,720px)] w-full bg-white"
             />
           </div>

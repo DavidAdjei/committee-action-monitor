@@ -1,6 +1,10 @@
 import { HttpResponseInit } from "@azure/functions";
+import {
+  EvidenceValidationError,
+  StorageUnavailableError,
+} from "../services/storageService";
 
-const CORS_ORIGIN = process.env.CORS_ALLOWED_ORIGIN ?? "http://localhost:5173";
+const CORS_ORIGIN = process.env.CORS_ALLOWED_ORIGIN ?? "*";
 
 export function corsHeaders(): Record<string, string> {
   return {
@@ -41,6 +45,27 @@ export function errorResponse(err: unknown): HttpResponseInit {
       headers: { "Content-Type": "application/json", ...corsHeaders() },
     };
   }
+
+  // File validation (type/size/key) — safe to show
+  if (err instanceof EvidenceValidationError) {
+    return {
+      status: 400,
+      jsonBody: { error: { code: err.code, message: err.message } },
+      headers: { "Content-Type": "application/json", ...corsHeaders() },
+    };
+  }
+
+  // Blob not configured / connection / auth / Azurite — safe operator diagnostics
+  if (err instanceof StorageUnavailableError) {
+    // eslint-disable-next-line no-console
+    console.error("[storage]", err.message);
+    return {
+      status: 503,
+      jsonBody: { error: { code: err.code, message: err.message } },
+      headers: { "Content-Type": "application/json", ...corsHeaders() },
+    };
+  }
+
   // Never leak internals (SQL, stack traces) to the client.
   // eslint-disable-next-line no-console
   console.error(err);
@@ -66,4 +91,5 @@ export const Errors = {
   versionConflict: (
     msg = "This record was updated by someone else. Reload it and try again.",
   ) => new ApiError(409, "VERSION_CONFLICT", msg),
+  serviceUnavailable: (msg: string) => new ApiError(503, "SERVICE_UNAVAILABLE", msg),
 };

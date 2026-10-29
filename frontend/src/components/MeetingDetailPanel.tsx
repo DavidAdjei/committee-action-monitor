@@ -8,6 +8,7 @@ import { useFlash } from "@/state/toastContext";
 import { useAuth } from "@/state/authContext";
 import { canCreateMeeting } from "@/lib/permissions";
 import { PreviewMinutesButton } from "@/components/MinutesDocumentPreview";
+import { safeHttpUrl } from "@/lib/safeUrl";
 
 interface MeetingDetail {
   id: number;
@@ -190,13 +191,13 @@ export function MeetingDetailPanel({
             <b>{detail.createdBy.fullName}</b>
             <span className="text-xs text-slate-400"> · {formatDate(detail.createdAt)}</span>
           </div>
-          {detail.teamsJoinUrl ? (
+          {safeHttpUrl(detail.teamsJoinUrl) ? (
             <div>
               <small className="block text-slate-400">Teams</small>
               <a
-                href={detail.teamsJoinUrl}
+                href={safeHttpUrl(detail.teamsJoinUrl)!}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 font-medium text-brand-700 dark:text-brand-300 hover:underline"
               >
                 <Video className="h-4 w-4" /> Join online meeting
@@ -267,11 +268,11 @@ export function MeetingDetailPanel({
                   </button>
                 </div>
               </label>
-              {detail.attendanceSheetUrl && (
+              {safeHttpUrl(detail.attendanceSheetUrl) && (
                 <a
-                  href={detail.attendanceSheetUrl}
+                  href={safeHttpUrl(detail.attendanceSheetUrl)!}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 dark:text-brand-300 hover:underline"
                 >
                   <ExternalLink className="h-3.5 w-3.5" /> Open current attendance sheet
@@ -383,16 +384,18 @@ export function MeetingDetailPanel({
                   </button>
                 ))}
               </div>
-              <label className="field-label">
-                Reason
-                <textarea
-                  className="field-input min-h-[60px]"
-                  required
-                  placeholder="Why the meeting did not proceed, or postponement rationale"
-                  value={outcomeReason}
-                  onChange={(e) => setOutcomeReason(e.target.value)}
-                />
-              </label>
+              {outcomeType !== "HELD" && (
+                <label className="field-label">
+                  Reason
+                  <textarea
+                    required
+                    className="field-input min-h-[72px]"
+                    value={outcomeReason}
+                    onChange={(e) => setOutcomeReason(e.target.value)}
+                    placeholder="Why the meeting did not proceed or was postponed"
+                  />
+                </label>
+              )}
               {outcomeType === "POSTPONED" && (
                 <div className="grid grid-cols-2 gap-2">
                   <label className="field-label">
@@ -421,7 +424,7 @@ export function MeetingDetailPanel({
                 className="btn-primary text-sm"
                 disabled={busy}
                 onClick={() => {
-                  if (!outcomeReason.trim()) {
+                  if (outcomeType !== "HELD" && !outcomeReason.trim()) {
                     flash("A reason is required.", "error");
                     return;
                   }
@@ -433,7 +436,7 @@ export function MeetingDetailPanel({
                   void endpoints
                     .recordMeetingOutcome(meetingId, {
                       outcome: outcomeType,
-                      reason: outcomeReason.trim(),
+                      reason: outcomeReason.trim() || (outcomeType === "HELD" ? "" : outcomeReason.trim()),
                       postponedTo:
                         outcomeType === "POSTPONED"
                           ? new Date(`${postponeDate}T${postponeTime || "10:00"}:00`).toISOString()

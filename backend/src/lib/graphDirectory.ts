@@ -1,3 +1,4 @@
+import { assertMicrosoftUrl } from "./microsoftUrl";
 /**
  * Microsoft Graph directory sync (application permissions).
  * Lists tenant users and upserts them into the local User table.
@@ -17,6 +18,7 @@
  */
 import { prisma } from "./prisma";
 import { Errors } from "./http";
+
 
 type GraphUser = {
   id: string;
@@ -66,14 +68,16 @@ async function getAppToken(): Promise<string> {
     grant_type: "client_credentials",
   });
 
-  const res = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
+  const tokenUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
+  assertMicrosoftUrl(tokenUrl, "token");
+  const res = await fetch(tokenUrl, {
     method: "POST",
+    redirect: "manual",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
   if (!res.ok) {
-    const t = await res.text();
-    throw Errors.badRequest(`Graph token request failed: ${res.status} ${t.slice(0, 200)}`);
+    throw Errors.badRequest(`Graph token request failed: HTTP ${res.status}.`);
   }
   const json = (await res.json()) as { access_token?: string };
   if (!json.access_token) throw Errors.badRequest("Graph token response missing access_token.");
@@ -95,16 +99,17 @@ async function listAllGraphUsers(accessToken: string): Promise<GraphUser[]> {
 
   const out: GraphUser[] = [];
   while (url) {
+    assertMicrosoftUrl(url, "users");
     const res = await fetch(url, {
+      redirect: "manual",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         ConsistencyLevel: "eventual",
       },
     });
     if (!res.ok) {
-      const t = await res.text();
       throw Errors.badRequest(
-        `Graph users list failed: ${res.status} ${t.slice(0, 300)}. ` +
+        `Graph users list failed: HTTP ${res.status}. ` +
           `Ensure the app has Application permission User.Read.All with admin consent.`,
       );
     }

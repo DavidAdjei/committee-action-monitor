@@ -8,7 +8,7 @@ Authentication is **Microsoft Entra ID only** (Bearer JWT). There is no demo / h
 - **Node.js** 20 LTS (or 18+)
 - **MySQL** 8.x running locally or reachable from your machine
 - **Azure Functions Core Tools** v4 (`func`)
-  - <https://learn.microsoft.com/azure/azure-functions/functions-run-local>
+  - https://learn.microsoft.com/azure/azure-functions/functions-run-local
 - **Entra ID** app registrations (API + SPA) with admin consent for your tenant
 
 Optional for local storage emulators: Azurite (only if you use Azure Storage locally).
@@ -34,7 +34,7 @@ cp .env.example .env
 **Minimum to run and sign in:**
 
 | Variable | Purpose |
-| ---------- | --------- |
+|----------|---------|
 | `DATABASE_URL` | MySQL connection string |
 | `ENTRA_TENANT_ID` | Your Entra tenant GUID |
 | `ENTRA_API_AUDIENCE` | API app audience, e.g. `api://{api-client-id}` |
@@ -44,7 +44,7 @@ cp .env.example .env
 **Optional (mail, directory, Teams):**
 
 | Variable | Purpose |
-| ---------- | --------- |
+|----------|---------|
 | `ENTRA_GRAPH_TENANT_ID` / `CLIENT_ID` / `CLIENT_SECRET` | Graph app registration |
 | `ENTRA_GRAPH_MAIL_SENDER` | Mailbox used to send mail |
 | `MAIL_DEV_LOG` | `true` = log mail instead of sending (local only) |
@@ -87,7 +87,7 @@ Health-style routes and business APIs are under `/api/...` (see `src/functions/`
 ## 5. Useful scripts
 
 | Command | What it does |
-| --------- | ---------------- |
+|---------|----------------|
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm start` | Build + start Azure Functions host |
 | `npm run prisma:generate` | Regenerate Prisma client |
@@ -119,7 +119,7 @@ backend/
 ## Troubleshooting
 
 | Problem | Check |
-| --------- | -------- |
+|---------|--------|
 | `UNAUTHENTICATED` / 401 | Bearer token present? `ENTRA_TENANT_ID` + `ENTRA_API_AUDIENCE` set? Token audience matches API app? |
 | `ACCOUNT_NOT_PROVISIONED` | User not in DB — seed or directory sync |
 | `IDENTITY_CONFLICT` | Email already linked to a different Entra oid — resolve in DB/admin |

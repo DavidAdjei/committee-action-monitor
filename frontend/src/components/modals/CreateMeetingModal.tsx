@@ -20,8 +20,7 @@ export function CreateMeetingModal({
 }) {
   const flash = useFlash();
   const { me } = useAuth();
-  const [reference, setReference] = useState("");
-  const [title, setTitle] = useState("October Committee Meeting");
+  const [title, setTitle] = useState("");
   const [date, setDate] = useState("");
   const [startTime, setStartTime] = useState("10:00");
   const [endTime, setEndTime] = useState("11:00");
@@ -44,8 +43,7 @@ export function CreateMeetingModal({
     setError(null);
     try {
       const created = await endpoints.createMeeting(committeeId, {
-        reference: reference.trim() || undefined,
-        title,
+        title: title.trim(),
         startsAt: new Date(`${date}T${startTime}:00`).toISOString(),
         endsAt: new Date(`${date}T${endTime}:00`).toISOString(),
         venue,
@@ -151,21 +149,15 @@ export function CreateMeetingModal({
     >
       <form onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <label className="field-label">
+          <label className="field-label sm:col-span-2">
             Meeting title
-            <input required className="field-input" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-          <label className="field-label">
-            Meeting reference
             <input
-              className="field-input placeholder:text-slate-400"
-              placeholder="Auto-generated (e.g. MIN/ISC/09/26)"
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
+              required
+              className="field-input"
+              placeholder="e.g. October committee meeting"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
             />
-            <small className="font-normal text-slate-400">
-              Leave blank to auto-generate institutional reference.
-            </small>
           </label>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

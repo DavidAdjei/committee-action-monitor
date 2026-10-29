@@ -1,5 +1,6 @@
 import { useLoadingStore } from "@/state/loadingStore";
 import { getAccessToken } from "@/auth/token";
+import { safeDownloadFilename } from "@/lib/safeUrl";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -97,14 +98,19 @@ export const api = {
       const res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
       if (!res.ok) throw await parseError(res);
       const blob = await res.blob();
+      if (/^(text\/html|application\/xhtml\+xml)(;|$)/i.test(blob.type)) {
+        throw new ApiClientError(415, "UNSAFE_DOWNLOAD", "Unexpected HTML download response.");
+      }
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      try {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = safeDownloadFilename(filename);
+        document.body.appendChild(a);
+        try { a.click(); } finally { a.remove(); }
+      } finally {
+        URL.revokeObjectURL(url);
+      }
     } finally {
       useLoadingStore.getState().stopRequest();
     }

@@ -61,6 +61,11 @@ export async function generateMeetingReference(
  */
 export async function createMeeting(input: CreateMeetingInput) {
   const maxAttempts = 5;
+  const title = (input.title ?? "").trim();
+  if (!title) {
+    throw Errors.badRequest("Meeting title is required.");
+  }
+
   const fixedRef =
     input.reference && input.reference.trim().length > 0 && input.reference.trim().toLowerCase() !== "auto"
       ? input.reference.trim()
@@ -69,6 +74,20 @@ export async function createMeeting(input: CreateMeetingInput) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       return await prisma.$transaction(async (tx) => {
+        // App-level uniqueness only (no schema unique index): title unique within a committee.
+        const titleTaken = await tx.meeting.findFirst({
+          where: {
+            committeeId: input.committeeId,
+            title: { equals: title },
+          },
+          select: { id: true },
+        });
+        if (titleTaken) {
+          throw Errors.conflict(
+            "A meeting with this title already exists for this committee. Choose a different name.",
+          );
+        }
+
         const reference =
           fixedRef ?? (await generateMeetingReference(input.committeeId, input.startsAt, tx));
 
@@ -88,7 +107,7 @@ export async function createMeeting(input: CreateMeetingInput) {
           data: {
             committeeId: input.committeeId,
             reference,
-            title: input.title,
+            title,
             startsAt: input.startsAt,
             endsAt: input.endsAt,
             venue: input.venue,
@@ -106,7 +125,7 @@ export async function createMeeting(input: CreateMeetingInput) {
             resourceType: "meeting",
             resourceId: meeting.id,
             committeeId: input.committeeId,
-            after: { reference, title: input.title },
+            after: { reference, title },
             result: "SUCCESS",
           }),
         });
@@ -114,6 +133,10 @@ export async function createMeeting(input: CreateMeetingInput) {
         return meeting;
       });
     } catch (err) {
+      // Title / fixed-reference conflicts must not be retried as reference races.
+      if (err instanceof Error && (err as Error & { status?: number }).status === 409) {
+        throw err;
+      }
       const unique =
         (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") ||
         (err instanceof Error && (err as Error & { code?: string }).code === "MEETING_REF_RETRY");
@@ -136,7 +159,7 @@ export type MeetingOutcomeInput = {
   meetingId: number;
   actorUserId: number;
   outcome: "HELD" | "DID_NOT_HOLD" | "POSTPONED";
-  reason: string;
+  reason?: string;
   /** Required when outcome is POSTPONED — new meeting start */
   postponedTo?: Date;
   /** Optional new end time when postponed */
@@ -152,8 +175,9 @@ export async function recordMeetingOutcome(input: MeetingOutcomeInput) {
   if (!meeting) throw Errors.notFound("Meeting");
 
   const reason = (input.reason || "").trim();
-  if (!reason) {
-    throw Errors.badRequest("A reason is required when recording the meeting outcome.");
+  // Held meetings do not require a reason; did-not-hold and postponed do.
+  if (!reason && input.outcome !== "HELD") {
+    throw Errors.badRequest("A reason is required for this meeting outcome.");
   }
 
   if (input.outcome === "POSTPONED") {
@@ -164,7 +188,7 @@ export async function recordMeetingOutcome(input: MeetingOutcomeInput) {
 
   const data: {
     outcome: "HELD" | "DID_NOT_HOLD" | "POSTPONED";
-    outcomeReason: string;
+    outcomeReason: string | null;
     postponedTo: Date | null;
     outcomeRecordedAt: Date;
     outcomeRecordedById: number;
@@ -172,7 +196,7 @@ export async function recordMeetingOutcome(input: MeetingOutcomeInput) {
     endsAt?: Date | null;
   } = {
     outcome: input.outcome,
-    outcomeReason: reason,
+    outcomeReason: reason || null,
     postponedTo: input.outcome === "POSTPONED" ? input.postponedTo! : null,
     outcomeRecordedAt: new Date(),
     outcomeRecordedById: input.actorUserId,

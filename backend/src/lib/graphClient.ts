@@ -1,3 +1,4 @@
+import { assertMicrosoftUrl } from "./microsoftUrl";
 /**
  * Microsoft Graph client — application (client credentials) and delegated (OBO / user token).
  *
@@ -15,6 +16,7 @@
  */
 
 import { Errors } from "./http";
+
 
 export function graphEnv(name: string, aliases: string[] = []): string | undefined {
   const keys = [name, ...aliases];
@@ -62,14 +64,16 @@ export async function getGraphAppToken(): Promise<string> {
     grant_type: "client_credentials",
   });
 
-  const res = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
+  const tokenUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
+  assertMicrosoftUrl(tokenUrl, "token");
+  const res = await fetch(tokenUrl, {
     method: "POST",
+    redirect: "manual",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
   if (!res.ok) {
-    const t = await res.text();
-    throw Errors.badRequest(`Graph token request failed: ${res.status} ${t.slice(0, 200)}`);
+    throw Errors.badRequest(`Graph token request failed: HTTP ${res.status}.`);
   }
   const json = (await res.json()) as { access_token?: string; expires_in?: number };
   if (!json.access_token) throw Errors.badRequest("Graph token response missing access_token.");
@@ -118,15 +122,17 @@ export async function getGraphDelegatedTokenViaObo(userAccessToken: string): Pro
     scope,
   });
 
-  const res = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
+  const tokenUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
+  assertMicrosoftUrl(tokenUrl, "token");
+  const res = await fetch(tokenUrl, {
     method: "POST",
+    redirect: "manual",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
   if (!res.ok) {
-    const t = await res.text();
     throw Errors.badRequest(
-      `Graph OBO token exchange failed: ${res.status} ${t.slice(0, 300)}. ` +
+      `Graph OBO token exchange failed: HTTP ${res.status}. ` +
         `Ensure the API app has delegated OnlineMeetings.ReadWrite and admin consent, ` +
         `and the SPA token is for this API (OBO).`,
     );
@@ -170,5 +176,7 @@ export async function graphFetch(
   if (rest.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  return fetch(`https://graph.microsoft.com/v1.0${path}`, { ...rest, headers });
+  const graphUrl = `https://graph.microsoft.com/v1.0${path.startsWith("/") ? path : `/${path}`}`;
+  assertMicrosoftUrl(graphUrl, "graph");
+  return fetch(graphUrl, { ...rest, redirect: "manual", headers });
 }
