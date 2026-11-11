@@ -59,6 +59,7 @@ model User {
   auditEvents           AuditEvent[]
   leaveRecords          UserLeave[] @relation("LeaveUser")
   leaveCreated          UserLeave[] @relation("LeaveCreatedBy")
+  bccRecipientsCreated  BccRecipient[] @relation("BccRecipientCreator")
 
   @@map("users")
 }
@@ -89,6 +90,7 @@ model Committee {
   meetings     Meeting[]
   actionPoints ActionPoint[]
   auditEvents  AuditEvent[]
+  bccRecipients BccRecipient[]
 
   @@map("committees")
 }
@@ -122,6 +124,25 @@ model CommitteeMembership {
   @@unique([committeeId, userId], name: "uq_committee_user")
   @@index([userId, active])
   @@map("committee_memberships")
+}
+
+/// External (or internal) emails BCC'd on action-point reminder / overdue mails for a committee.
+/// Used so nominated people can follow up if the secretary misses the reminder.
+model BccRecipient {
+  id          Int      @id @default(autoincrement())
+  committeeId Int      @map("committee_id")
+  email       String   @db.VarChar(190)
+  displayName String?  @map("display_name") @db.VarChar(180)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  createdById Int?     @map("created_by_id")
+
+  committee Committee @relation(fields: [committeeId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("BccRecipientCreator", fields: [createdById], references: [id])
+
+  @@unique([committeeId, email], name: "uq_committee_bcc_email")
+  @@index([committeeId, active])
+  @@map("bcc_recipients")
 }
 
 // ---------------------------------------------------------------------------

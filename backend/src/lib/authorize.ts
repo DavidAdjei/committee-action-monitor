@@ -83,6 +83,38 @@ export async function requireCommitteeOfficer(user: User, committeeId: number): 
   }
 }
 
+/** True when the user is the active Secretary of this committee (membership or secretaryId seat). */
+export async function isCommitteeSecretary(userId: number, committeeId: number): Promise<boolean> {
+  const committee = await prisma.committee.findUnique({
+    where: { id: committeeId },
+    select: { secretaryId: true },
+  });
+  if (committee?.secretaryId === userId) return true;
+  const membership = await prisma.committeeMembership.findFirst({
+    where: {
+      userId,
+      committeeId,
+      active: true,
+      role: "SECRETARY",
+    },
+  });
+  return membership !== null;
+}
+
+/**
+ * BCC recipient management: committee secretary or platform super-admin.
+ * Chair and Central Admin (without secretary seat) are not allowed.
+ */
+export async function requireCommitteeSecretary(user: User, committeeId: number): Promise<void> {
+  if (isPlatformAdmin(user)) return;
+  const ok = await isCommitteeSecretary(user.id, committeeId);
+  if (!ok) {
+    throw Errors.forbidden(
+      "Only this committee's Secretary or a platform administrator may manage BCC reminder recipients.",
+    );
+  }
+}
+
 /** View a committee: platform admin, any Central member, or active committee member. */
 export async function canViewCommittee(user: User, committeeId: number): Promise<boolean> {
   if (isPlatformAdmin(user)) return true;

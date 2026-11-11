@@ -1,15 +1,26 @@
 import { createHash, randomUUID } from "crypto";
 import path from "path";
+import { DefaultAzureCredential } from "@azure/identity";
 import { BlobServiceClient, ContainerClient, RestError } from "@azure/storage-blob";
 
 const ALLOWED_EXTENSIONS = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png"];
 const MAX_BYTES = 20 * 1024 * 1024; // 20 MB
 
+/**
+ * Hardcoded account URL for managed-identity access.
+ * Override with EVIDENCE_STORAGE_ACCOUNT_URL when ready (no connection strings).
+ * Account: umbcamprodstorage
+ */
+const HARDCODED_STORAGE_ACCOUNT_URL = "https://umbcamprodstorage.blob.core.windows.net";
+
 /** Logical purpose → blob container name */
 export type StoragePurpose = "evidence" | "minutes" | "meeting-papers";
 
 const PURPOSE_CONTAINERS: Record<StoragePurpose, string> = {
-  evidence: process.env.EVIDENCE_BLOB_CONTAINER?.trim() || "evidence",
+  evidence:
+    process.env.EVIDENCE_BLOB_CONTAINER?.trim() ||
+    process.env.EVIDENCE_STORAGE_CONTAINER?.trim() ||
+    "evidence",
   minutes: process.env.MINUTES_BLOB_CONTAINER?.trim() || "minutes",
   "meeting-papers": process.env.MEETING_PAPERS_BLOB_CONTAINER?.trim() || "meeting-papers",
 };
@@ -26,7 +37,7 @@ export class EvidenceValidationError extends Error {
 }
 
 /**
- * Storage not configured or Azure/Azurite unreachable → HTTP 503.
+ * Storage / credential failures → HTTP 503.
  * Message is safe to show in the UI for operators without log access.
  */
 export class StorageUnavailableError extends Error {
@@ -50,29 +61,29 @@ function assertAllowed(filename: string, sizeBytes: number) {
   }
 }
 
-/**
- * Always required — no local-disk fallback.
- * Use Azurite connection string locally; real Azure connection string in cloud.
- */
-function requireConnectionString(): string {
-  const cs = process.env.EVIDENCE_STORAGE_CONNECTION_STRING?.trim();
-  if (!cs) {
-    throw new StorageUnavailableError(
-      "File storage is not configured. Set application setting EVIDENCE_STORAGE_CONNECTION_STRING " +
-        "to the Azure Storage connection string (or Azurite for local). " +
-        "Containers used: evidence, minutes, meeting-papers.",
-    );
-  }
-  return cs;
+function storageAccountUrl(): string {
+  return (process.env.EVIDENCE_STORAGE_ACCOUNT_URL?.trim() || HARDCODED_STORAGE_ACCOUNT_URL).replace(
+    /\/+$/,
+    "",
+  );
 }
 
+/**
+ * Managed identity only — no account-key / connection-string path.
+ * Azure Functions: system-assigned managed identity via DefaultAzureCredential.
+ * Local: az login (user must have Storage Blob Data Contributor on the account).
+ */
 function blobService(): BlobServiceClient {
+  const accountUrl = storageAccountUrl();
   try {
-    return BlobServiceClient.fromConnectionString(requireConnectionString());
+    const credential = new DefaultAzureCredential();
+    return new BlobServiceClient(accountUrl, credential);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new StorageUnavailableError(
-      "Invalid EVIDENCE_STORAGE_CONNECTION_STRING. Check the connection string format. " +
+      `Could not create Blob client for ${accountUrl} with managed identity (DefaultAzureCredential). ` +
+        "Ensure the Function App system-assigned identity is On and has Storage Blob Data Contributor " +
+        "on the storage account. Connection-string / account-key access is disabled. " +
         `Detail: ${detail}`,
     );
   }
@@ -97,30 +108,23 @@ function mapBlobError(err: unknown, action: string, container?: string): never {
       ? String((err as { code?: string }).code ?? "")
       : "";
   const rawMessage =
-    err instanceof Error
-      ? err.message
-      : typeof err === "string"
-        ? err
-        : "Unknown storage error";
+    err instanceof Error ? err.message : typeof err === "string" ? err : "Unknown storage error";
 
   const where = container ? ` (container "${container}")` : "";
+  const accountUrl = storageAccountUrl();
 
   if (
-    /API version .* is not supported by Azurite/i.test(rawMessage) ||
-    /skipApiVersionCheck/i.test(rawMessage)
+    status === 403 ||
+    code === "AuthorizationFailure" ||
+    code === "AuthorizationPermissionMismatch" ||
+    /authorization|AuthenticationFailed|ManagedIdentity|CredentialUnavailable/i.test(rawMessage)
   ) {
     throw new StorageUnavailableError(
-      `Azurite rejected the storage client API version while trying to ${action}${where}. ` +
-        "Upgrade Azurite or start it with --skipApiVersionCheck. " +
-        `Detail: ${rawMessage}`,
-    );
-  }
-
-  if (status === 403 || code === "AuthorizationFailure" || /authorization/i.test(rawMessage)) {
-    throw new StorageUnavailableError(
       `Storage authorization failed while trying to ${action}${where}. ` +
-        "Check the connection string account key, or grant the Function App managed identity " +
-        "Storage Blob Data Contributor on the storage account. " +
+        `Account: ${accountUrl}. ` +
+        "Grant the Function App system-assigned managed identity Storage Blob Data Contributor on this account. " +
+        "Account-key / connection-string access is disabled. " +
+        "Locally run az login with a user that has the same role. " +
         `Detail: ${rawMessage}`,
     );
   }
@@ -131,8 +135,7 @@ function mapBlobError(err: unknown, action: string, container?: string): never {
     }
     throw new StorageUnavailableError(
       `Storage container missing while trying to ${action}${where}. ` +
-        "Create containers evidence, minutes, and meeting-papers (or set EVIDENCE_BLOB_CONTAINER / " +
-        "MINUTES_BLOB_CONTAINER / MEETING_PAPERS_BLOB_CONTAINER). " +
+        "Create containers evidence, minutes, and meeting-papers on the storage account. " +
         `Detail: ${rawMessage}`,
     );
   }
@@ -145,9 +148,10 @@ function mapBlobError(err: unknown, action: string, container?: string): never {
     /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|fetch failed|network/i.test(rawMessage)
   ) {
     throw new StorageUnavailableError(
-      `Cannot reach Azure Blob Storage while trying to ${action}${where}. ` +
-        "If using Azurite, ensure it is running on the Blob endpoint. " +
-        "If using Azure, check the connection string AccountName and network rules. " +
+      `Cannot reach Azure Blob Storage or acquire credentials while trying to ${action}${where}. ` +
+        `Account: ${accountUrl}. ` +
+        "On Azure, confirm managed identity is enabled on the Function App. " +
+        "Locally run az login. Connection strings are not supported. " +
         `Detail: ${rawMessage}`,
     );
   }
@@ -155,12 +159,12 @@ function mapBlobError(err: unknown, action: string, container?: string): never {
   if (err instanceof RestError) {
     throw new StorageUnavailableError(
       `Blob storage error while trying to ${action}${where} (HTTP ${status ?? "n/a"}, code ${code || "n/a"}). ` +
-        `Detail: ${rawMessage}`,
+        `Account: ${accountUrl}. Detail: ${rawMessage}`,
     );
   }
 
   throw new StorageUnavailableError(
-    `Blob storage failed while trying to ${action}${where}. Detail: ${rawMessage}`,
+    `Blob storage failed while trying to ${action}${where}. Account: ${accountUrl}. Detail: ${rawMessage}`,
   );
 }
 
@@ -207,8 +211,7 @@ export interface StoredEvidence {
 }
 
 /**
- * Persist a file to Azure Blob Storage (or Azurite when using the dev connection string).
- * There is no local filesystem fallback.
+ * Persist a file to Azure Blob Storage using managed identity only.
  */
 export async function storeEvidenceFile(params: {
   filename: string;

@@ -5,6 +5,7 @@ import {
   requireViewCommittee,
   requireCentralCommittee,
   requireCommitteeOfficer,
+  requireCommitteeSecretary,
   isCommitteeOfficer,
   isPlatformAdmin,
   isCentralMember,
@@ -15,6 +16,11 @@ import { ok, errorResponse, preflight, Errors, ApiError } from "../lib/http";
 import { committeeSummary } from "../services/reportService";
 import { recordDenied } from "../services/auditService";
 import { addCommitteeMember, setCommitteeChair, removeCommitteeMember, setCommitteeCentralRep, updateCommitteeDistributionEmail } from "../services/committeeService";
+import {
+  listBccRecipients,
+  addBccRecipient,
+  removeBccRecipient,
+} from "../services/bccRecipientService";
 
 async function committeeDetail(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
   if (req.method === "OPTIONS") return preflight();
@@ -328,3 +334,76 @@ app.http("setCommitteeDistributionEmail", {
   handler: setDistributionEmailHandler,
 });
 
+async function listBccRecipientsHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const committeeId = Number(req.params.id);
+    if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
+    await requireCommitteeSecretary(user, committeeId);
+    const rows = await listBccRecipients(committeeId);
+    return ok(rows);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+async function addBccRecipientHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const committeeId = Number(req.params.id);
+    if (!Number.isInteger(committeeId)) throw Errors.badRequest("Invalid committee id.");
+    await requireCommitteeSecretary(user, committeeId);
+    const body = (await req.json()) as { email?: string; displayName?: string | null };
+    if (!body.email) throw Errors.badRequest("email is required.");
+    const row = await addBccRecipient({
+      committeeId,
+      email: body.email,
+      displayName: body.displayName,
+      actorUserId: user.id,
+    });
+    return ok(row, 201);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+async function removeBccRecipientHandler(req: HttpRequest, _ctx: InvocationContext): Promise<HttpResponseInit> {
+  if (req.method === "OPTIONS") return preflight();
+  try {
+    const user = await requireUser(req);
+    const committeeId = Number(req.params.id);
+    const recipientId = Number(req.params.recipientId);
+    if (!Number.isInteger(committeeId) || !Number.isInteger(recipientId)) {
+      throw Errors.badRequest("Invalid id.");
+    }
+    await requireCommitteeSecretary(user, committeeId);
+    const result = await removeBccRecipient({
+      committeeId,
+      recipientId,
+      actorUserId: user.id,
+    });
+    return ok(result);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+app.http("committeeBccRecipients", {
+  methods: ["GET", "POST", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "committees/{id}/bcc-recipients",
+  handler: async (req, ctx) => {
+    if (req.method === "GET") return listBccRecipientsHandler(req, ctx);
+    if (req.method === "POST") return addBccRecipientHandler(req, ctx);
+    return listBccRecipientsHandler(req, ctx);
+  },
+});
+
+app.http("committeeBccRecipientDelete", {
+  methods: ["DELETE", "OPTIONS"],
+  authLevel: "anonymous",
+  route: "committees/{id}/bcc-recipients/{recipientId}",
+  handler: removeBccRecipientHandler,
+});

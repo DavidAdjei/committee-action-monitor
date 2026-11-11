@@ -12,6 +12,7 @@ import { SetCentralRepModal } from "@/components/modals/SetCentralRepModal";
 import { ActionCommentsModal } from "@/components/modals/ActionCommentsModal";
 import { MinutesDetailPanel } from "@/components/MinutesDetailPanel";
 import { LoadingLogo } from "@/components/LoadingLogo";
+import { MultiStakeholderPicker } from "@/components/MultiStakeholderPicker";
 import { useAuth } from "@/state/authContext";
 import { useFlash } from "@/state/toastContext";
 import { ApiClientError } from "@/api/client";
@@ -24,7 +25,7 @@ import {
 } from "@/lib/permissions";
 // canCreateMinutes still used for canEdit officer gate
 import { AttendanceQrProjector } from "@/components/AttendanceQrProjector";
-import type { ActionListItem, CommitteeDetail, Meeting, MeetingMinutes } from "@/types";
+import type { ActionListItem, CommitteeDetail, DirectoryUser, Meeting, MeetingMinutes } from "@/types";
 
 const TABS = ["Overview", "Action Points", "Meetings", "Minutes"] as const;
 type Tab = (typeof TABS)[number];
@@ -68,6 +69,9 @@ export default function CommitteeWorkspace() {
     checkInUrl: string;
   } | null>(null);
   const [projectLoadingId, setProjectLoadingId] = useState<number | null>(null);
+  const [bccList, setBccList] = useState<{ id: number; email: string; displayName: string | null }[]>([]);
+  const [bccPick, setBccPick] = useState<DirectoryUser[]>([]);
+  const [bccBusy, setBccBusy] = useState(false);
   const [distroDraft, setDistroDraft] = useState("");
   const [distroBusy, setDistroBusy] = useState(false);
   const [showSecTip, setShowSecTip] = useState(() => {
@@ -165,7 +169,20 @@ export default function CommitteeWorkspace() {
   useEffect(() => {
     if (detail?.distributionEmail != null) setDistroDraft(detail.distributionEmail);
     else if (detail) setDistroDraft("");
-  }, [detail?.id, detail?.distributionEmail]);
+
+    const canManageBcc =
+      Boolean(me?.isAdmin) ||
+      detail?.myRole === "SECRETARY" ||
+      (me?.id != null && detail?.secretary?.id === me.id);
+    if (canManageBcc) {
+      void endpoints
+        .listBccRecipients(committeeId)
+        .then(setBccList)
+        .catch(() => setBccList([]));
+    } else {
+      setBccList([]);
+    }
+  }, [detail?.id, detail?.distributionEmail, detail?.myRole, detail?.secretary?.id, me?.id, committeeId]);
 
   if (loadError) {
     return (
@@ -192,6 +209,11 @@ export default function CommitteeWorkspace() {
     detail.canManageMembers !== undefined && detail.canManageMembers !== null
       ? Boolean(detail.canManageMembers)
       : canManageMembers(me, committeeId);
+  const isSecretary =
+    detail.myRole === "SECRETARY" ||
+    (me?.id != null && detail.secretary?.id === me.id);
+  /** Secretary or platform super-admin can manage BCC reminder recipients. */
+  const canManageBcc = Boolean(me?.isAdmin) || isSecretary;
 
   return (
     <div className="space-y-5">
@@ -311,7 +333,6 @@ export default function CommitteeWorkspace() {
               Distribution list: {detail.distributionEmail}
             </p>
           )}
-
         </div>
 
         {/* Action / Governance Buttons */}
@@ -832,6 +853,110 @@ export default function CommitteeWorkspace() {
           }}
         />
       )}
+      {canManageBcc && (
+        <div className="card space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              BCC on action reminders
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Search and select people to blind-copy on action-point reminder and overdue emails for this committee
+              (so they can follow up if you miss a reminder). You can select one or more users.
+            </p>
+          </div>
+          {bccList.length > 0 && (
+            <ul className="space-y-1">
+              {bccList.map((r) => (
+                <li
+                  key={r.id}
+                  className="flex items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs dark:border-slate-600 dark:bg-slate-950"
+                >
+                  <span className="min-w-0 truncate">
+                    <span className="font-medium text-slate-800 dark:text-slate-100">{r.email}</span>
+                    {r.displayName ? (
+                      <span className="text-slate-500"> · {r.displayName}</span>
+                    ) : null}
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 text-red-600 hover:underline dark:text-red-400"
+                    disabled={bccBusy}
+                    onClick={() => {
+                      void (async () => {
+                        setBccBusy(true);
+                        try {
+                          await endpoints.removeBccRecipient(committeeId, r.id);
+                          setBccList((prev) => prev.filter((x) => x.id !== r.id));
+                          flash("BCC recipient removed");
+                        } catch (err: unknown) {
+                          flash(
+                            err instanceof ApiClientError ? err.message : "Could not remove BCC recipient.",
+                            "error",
+                          );
+                        } finally {
+                          setBccBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="space-y-2">
+            <MultiStakeholderPicker
+              label="Add BCC recipients"
+              helpText="Type a name or email — pick one or more from the directory."
+              selected={bccPick}
+              onChange={setBccPick}
+              excludeIds={[]}
+            />
+            <button
+              type="button"
+              className="btn text-xs"
+              disabled={bccBusy || bccPick.length === 0}
+              onClick={() => {
+                void (async () => {
+                  setBccBusy(true);
+                  try {
+                    const added: { id: number; email: string; displayName: string | null }[] = [];
+                    for (const u of bccPick) {
+                      const row = await endpoints.addBccRecipient(committeeId, {
+                        email: u.email,
+                        displayName: u.fullName || null,
+                      });
+                      added.push(row);
+                    }
+                    setBccList((prev) => {
+                      const byEmail = new Map(prev.map((x) => [x.email.toLowerCase(), x]));
+                      for (const row of added) byEmail.set(row.email.toLowerCase(), row);
+                      return [...byEmail.values()].sort((a, b) => a.email.localeCompare(b.email));
+                    });
+                    setBccPick([]);
+                    flash(
+                      added.length === 1
+                        ? "BCC recipient added"
+                        : `${added.length} BCC recipients added`,
+                    );
+                  } catch (err: unknown) {
+                    flash(
+                      err instanceof ApiClientError ? err.message : "Could not add BCC recipient(s).",
+                      "error",
+                    );
+                  } finally {
+                    setBccBusy(false);
+                  }
+                })();
+              }}
+            >
+              {bccBusy ? "Saving…" : bccPick.length > 1 ? `Add ${bccPick.length} as BCC` : "Add as BCC"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {projectMeeting && (
         <AttendanceQrProjector
           meetingTitle={projectMeeting.title}

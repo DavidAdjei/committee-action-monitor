@@ -20,6 +20,7 @@ import {
   emailSignatureText,
 } from "../lib/emailLayout";
 import type { OutboundNotification } from "./notificationService";
+import { loadCommitteeBccRecipients } from "./bccRecipientService";
 
 export type MailAttachment = {
   filename: string;
@@ -237,6 +238,8 @@ export async function sendGraphMail(params: {
   toRecipients?: { email: string; name?: string }[];
   /** Optional CC list (e.g. Central Committee when enabled) */
   ccRecipients?: { email: string; name?: string }[];
+  /** Optional BCC list (committee reminder watchers) */
+  bccRecipients?: { email: string; name?: string }[];
   subject: string;
   html: string;
   text: string;
@@ -275,6 +278,15 @@ export async function sendGraphMail(params: {
 
   if (params.ccRecipients && params.ccRecipients.length > 0) {
     message.ccRecipients = params.ccRecipients.map((r) => ({
+      emailAddress: {
+        address: r.email,
+        name: r.name || r.email,
+      },
+    }));
+  }
+
+  if (params.bccRecipients && params.bccRecipients.length > 0) {
+    message.bccRecipients = params.bccRecipients.map((r) => ({
       emailAddress: {
         address: r.email,
         name: r.name || r.email,
@@ -339,6 +351,24 @@ function pushCc(
  * CC list for action emails: committee secretary + Central Committee distribution
  * mailbox (and optionally each central member when EMAIL_CC_CENTRAL_COMMITTEE=true).
  */
+
+/** Action reminder mails that should BCC committee-configured watchers. */
+const BCC_ON_TYPES = new Set(["DAILY_REMINDER", "OVERDUE_ESCALATION"]);
+
+async function loadActionEmailBccList(
+  actionPointId: number | null,
+  excludeEmails: Set<string>,
+  notificationType: string,
+): Promise<{ email: string; name?: string }[]> {
+  if (!actionPointId || !BCC_ON_TYPES.has(notificationType)) return [];
+  const action = await prisma.actionPoint.findUnique({
+    where: { id: actionPointId },
+    select: { committeeId: true },
+  });
+  if (!action) return [];
+  return loadCommitteeBccRecipients(action.committeeId, excludeEmails);
+}
+
 async function loadActionEmailCcList(
   actionPointId: number | null,
   excludeEmails: Set<string>,
@@ -426,11 +456,14 @@ export async function deliverNotification(n: {
 
   const exclude = new Set([content.toEmail.toLowerCase()]);
   const cc = await loadActionEmailCcList(n.actionPointId, exclude, n.notificationType);
+  for (const c of cc) exclude.add(c.email.toLowerCase());
+  const bcc = await loadActionEmailBccList(n.actionPointId, exclude, n.notificationType);
 
   await sendGraphMail({
     toEmail: content.toEmail,
     toName: content.toName,
     ccRecipients: cc.length ? cc : undefined,
+    bccRecipients: bcc.length ? bcc : undefined,
     subject: content.subject,
     html: content.html,
     text: content.text,
@@ -685,12 +718,19 @@ export async function processPendingEmailQueue(limit = 500): Promise<{
         exclude,
         seed.notificationType,
       );
+      for (const c of cc) exclude.add(c.email.toLowerCase());
+      const bcc = await loadActionEmailBccList(
+        primaryActionId,
+        exclude,
+        seed.notificationType,
+      );
 
       if (!isMailSendConfigured()) {
         if (process.env.MAIL_DEV_LOG === "true") {
           console.info(
             `[mail:dev] BATCH key=${groupKey} To=${toRecipients.map((r) => r.email).join(", ")} ` +
-              `Cc=${cc.map((c) => c.email).join(", ") || "(none)"} Subject=${subject}`,
+              `Cc=${cc.map((c) => c.email).join(", ") || "(none)"} ` +
+              `Bcc=${bcc.map((b) => b.email).join(", ") || "(none)"} Subject=${subject}`,
           );
         } else {
           throw new Error(
@@ -701,12 +741,13 @@ export async function processPendingEmailQueue(limit = 500): Promise<{
         await sendGraphMail({
           toRecipients,
           ccRecipients: cc.length ? cc : undefined,
+          bccRecipients: bcc.length ? bcc : undefined,
           subject,
           html,
           text,
         });
         console.info(
-          `[mail] BATCH sent key=${groupKey} to=${toRecipients.length} cc=${cc.length} ` +
+          `[mail] BATCH sent key=${groupKey} to=${toRecipients.length} cc=${cc.length} bcc=${bcc.length} ` +
             `notifIds=${group.map((g) => g.id).join(",")}`,
         );
       }
